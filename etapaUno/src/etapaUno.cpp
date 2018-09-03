@@ -23,15 +23,35 @@ using namespace std;
 vector<Point> points;
 
 // Frozen picture
-bool frozen = false;
+bool frozen = false, closeP=false;
 
 int trackValue = 0;
 
+int low_H = 0, low_S = 0, low_V = 0;
+int high_H = 255, high_S = 255, high_V = 255;
+int low_R = 0, low_G = 0, low_B = 0;
+int high_R = 255, high_G = 255, high_B = 255;
+
 /* Create images where captured and transformed frames are going to be stored */
 	Mat auxImage;
+	Mat hsv_thres;
+	Mat bgr_thres;
+	
+	// Create image template for coloring
+	Mat solidColor(50, 50, CV_8UC3);
+
+	/* Create images where captured and transformed frames are going to be stored */
+	Mat currentImage;
+
+// Store BGR values of a point in image
+Vec3b colorsBGR;
 
 /* This is the callback that will only display mouse coordinates */
 void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* param);
+
+
+
+
 
 void modThreshold(int,void*)
 {
@@ -40,14 +60,26 @@ void modThreshold(int,void*)
 	imshow("B&W", tempImage);
 }
 
+void mod_HSV_threshold(int,void*)
+{
+	inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
+	imshow("HSV Threshold", hsv_thres);
+}
+
+void mod_BGR_threshold(int,void*)
+{
+	inRange(currentImage, Scalar(low_B, low_G, low_R), Scalar(high_B, high_G, high_R), bgr_thres);
+	imshow("RGB Threshold", bgr_thres);
+}
+
+
+
 int main(int argc, char *argv[])
 {
 	/* First, open camera device */
 	VideoCapture camera;
     camera.open(0);
 
-	/* Create images where captured and transformed frames are going to be stored */
-	Mat currentImage;
 
     /* Create main OpenCV window to attach callbacks */
     namedWindow("Image");
@@ -77,34 +109,51 @@ int main(int argc, char *argv[])
 
 			/* Show image */
 			imshow("Image", currentImage);
-
-			/* If 'f' is pressed, freeze image */
-			if (waitKey(3) == 'f'){
-				frozen = not frozen;
+			
+			switch(waitKey(3)){
+				case 'f':
+					/* If 'f' is pressed, freeze image */
+					frozen = not frozen;
+					break;
+				case 'b':
+					/* If 'b' is pressed, b&w image */
+					cvtColor(currentImage, auxImage, cv::COLOR_BGR2GRAY);
+					imshow("B&W", auxImage);
+					createTrackbar("Umbral", "B&W", &trackValue, 255, modThreshold);
+					break;
+				case 'r':
+					/* If 'r' is pressed, rgb image */
+					imshow("RGB", currentImage);
+					inRange(currentImage, Scalar(low_B, low_G, low_R), Scalar(high_B, high_G, high_R), bgr_thres);
+					imshow("RGB Threshold", bgr_thres);
+					createTrackbar("Bmin", "RGB", &low_B, 255, mod_BGR_threshold);
+					createTrackbar("Bmax", "RGB", &high_B, 255, mod_BGR_threshold);
+					createTrackbar("Gmin", "RGB", &low_G, 255, mod_BGR_threshold);
+					createTrackbar("Gmax", "RGB", &high_G, 255, mod_BGR_threshold);
+					createTrackbar("Rmin", "RGB", &low_R, 255, mod_BGR_threshold);
+					createTrackbar("Rmax", "RGB", &high_R, 255, mod_BGR_threshold);
+					break;
+				case 'h':
+					/* If 'h' is pressed, hsv image */
+					cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
+					imshow("HSV", auxImage);
+					inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
+					imshow("HSV Threshold", hsv_thres);
+					createTrackbar("Hmin", "HSV", &low_H, 255, mod_HSV_threshold);
+					createTrackbar("Hmax", "HSV", &high_H, 255, mod_HSV_threshold);
+					createTrackbar("Smin", "HSV", &low_S, 255, mod_HSV_threshold);
+					createTrackbar("Smax", "HSV", &high_S, 255, mod_HSV_threshold);
+					createTrackbar("Vmin", "HSV", &low_V, 255, mod_HSV_threshold);
+					createTrackbar("Vmax", "HSV", &high_V, 255, mod_HSV_threshold);
+					break;
+				case 'x':
+					/* If 'x' is pressed, exit program */
+					closeP = true;
+					break;
 			}
-			/* If 'b' is pressed, b&w image */
-			if (waitKey(3) == 'b'){
-				cvtColor(currentImage, auxImage, cv::COLOR_RGB2GRAY);
-				imshow("B&W", auxImage);
-				createTrackbar("Umbral", "B&W", &trackValue, 255, modThreshold);
-
-			}
-			if (waitKey(3) == 'h'){
-				cvtColor(currentImage, auxImage, cv::COLOR_RGB2GRAY);
-				imshow("HSV", auxImage);
-				createTrackbar("Hmax", "HSV", &trackValue, 255, modThreshold);
-				createTrackbar("Hmin", "HSV", &trackValue, 255, modThreshold);
-				createTrackbar("Vmax", "HSV", &trackValue, 255, modThreshold);
-				createTrackbar("Vmin", "HSV", &trackValue, 255, modThreshold);
-				createTrackbar("Smax", "HSV", &trackValue, 255, modThreshold);
-				createTrackbar("Smin", "HSV", &trackValue, 255, modThreshold);
+			if (closeP) break;
 
 
-			}
-
-			/* If 'x' is pressed, exit program */
-			if (waitKey(3) == 'x')
-				break;
 		}
 		else
 		{
@@ -121,6 +170,10 @@ void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* p
         case CV_EVENT_LBUTTONDOWN:
             cout << "  Mouse X, Y: " << x << ", " << y ;
             cout << endl;
+			colorsBGR = currentImage.at<Vec3b>(y,x);
+			cout << "B: " << int(colorsBGR[0])<< " G: " << int(colorsBGR[1])<< " R: " << int(colorsBGR[2])<<endl;
+			//Open new window with solid color of pixel at click
+			imshow("Color", solidColor.setTo(Scalar(int(colorsBGR[0]), int(colorsBGR[1]), int(colorsBGR[2]))));
             /*  Draw a point */
             points.push_back(Point(x, y));
             break;
