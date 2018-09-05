@@ -36,7 +36,8 @@ int high_R = 255, high_G = 255, high_B = 255;
 	Mat auxImage;
 	Mat hsv_thres;
 	Mat bgr_thres;
-	
+	Mat output;
+
 	// Create image template for coloring
 	Mat solidColor(50, 50, CV_8UC3);
 
@@ -63,14 +64,21 @@ void modThreshold(int,void*)
 
 void mod_HSV_threshold(int,void*)
 {
+	cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
 	inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
-	imshow("HSV Threshold", hsv_thres);
+	currentImage.copyTo(output, hsv_thres);
+	imshow("HSV", hsv_thres);
+	imshow("HSV Threshold", output);
+	output.release();
 }
 
 void mod_BGR_threshold(int,void*)
 {
 	inRange(currentImage, Scalar(low_B, low_G, low_R), Scalar(high_B, high_G, high_R), bgr_thres);
-	imshow("RGB Threshold", bgr_thres);
+	currentImage.copyTo(output, bgr_thres);
+	imshow("RGB", bgr_thres);
+	imshow("RGB Threshold", output);
+	output.release();
 }
 
 
@@ -94,7 +102,7 @@ int main(int argc, char *argv[])
 			camera >> currentImage;
 		}
 
-		if (currentImage.data) 
+		if (currentImage.data)
 		{
 
 			/* Draw all points */
@@ -106,11 +114,11 @@ int main(int argc, char *argv[])
 					line(currentImage, (Point)points[p-1], (Point)points[p], Scalar( 0, 255, 0 ), 1, 8, 0);
 				}
 			}
-			
+
 
 			/* Show image */
 			imshow("Image", currentImage);
-			
+
 			switch(waitKey(3)){
 				case 'f':
 					/* If 'f' is pressed, freeze image */
@@ -126,27 +134,24 @@ int main(int argc, char *argv[])
 					/* If 'r' is pressed, rgb image */
 					bgrHistogram();
 					imshow("RGB", currentImage);
-					inRange(currentImage, Scalar(low_B, low_G, low_R), Scalar(high_B, high_G, high_R), bgr_thres);
-					imshow("RGB Threshold", bgr_thres);
 					createTrackbar("Bmin", "RGB", &low_B, 255, mod_BGR_threshold);
 					createTrackbar("Bmax", "RGB", &high_B, 255, mod_BGR_threshold);
 					createTrackbar("Gmin", "RGB", &low_G, 255, mod_BGR_threshold);
 					createTrackbar("Gmax", "RGB", &high_G, 255, mod_BGR_threshold);
 					createTrackbar("Rmin", "RGB", &low_R, 255, mod_BGR_threshold);
 					createTrackbar("Rmax", "RGB", &high_R, 255, mod_BGR_threshold);
+					mod_BGR_threshold(0,0);
 					break;
 				case 'h':
 					/* If 'h' is pressed, hsv image */
-					cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
-					imshow("HSV", auxImage);
-					inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
-					imshow("HSV Threshold", hsv_thres);
+					imshow("HSV", currentImage);
 					createTrackbar("Hmin", "HSV", &low_H, 255, mod_HSV_threshold);
 					createTrackbar("Hmax", "HSV", &high_H, 255, mod_HSV_threshold);
 					createTrackbar("Smin", "HSV", &low_S, 255, mod_HSV_threshold);
 					createTrackbar("Smax", "HSV", &high_S, 255, mod_HSV_threshold);
 					createTrackbar("Vmin", "HSV", &low_V, 255, mod_HSV_threshold);
 					createTrackbar("Vmax", "HSV", &high_V, 255, mod_HSV_threshold);
+					mod_HSV_threshold(0,0);
 					break;
 				case 'x':
 					/* If 'x' is pressed, exit program */
