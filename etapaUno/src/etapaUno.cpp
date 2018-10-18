@@ -23,14 +23,63 @@
 #include <math.h>
 #include <opencv/cv.h>
 
+//#include <list>
+
  #define CV_CAST_8U
 
 using namespace cv;
 using namespace std;
 
+// Arreglo para mapeado de identificador con color para segmentacion
+Vec3i colors[5] ={
+  Vec3i(255, 244, 30), // Light Blue
+  Vec3i(51, 255, 255), // Yellow
+  Vec3i(47, 255, 173), // Green
+  Vec3i(0, 140, 255), // Orange
+  Vec3i(0, 69, 255) // Red
+};
+
+int coloringIndex = 0;
+
+/* Funcion para ejecutar gota de aceite
+ P = punto a expandir
+ K = matriz de regiones
+ F = imagen de entrada (binarizada)
+*/
+void gotaDeAceite(Point P, Mat K, Mat F){
+  //List for Gota de Aceite
+  //list<Point> Fo;
+  vector<Point> Fo; //Lista de puntos por procesar
+  Point vecinos[4] = {Point(0,1),Point(0,-1),Point(1,0),Point(-1,0)}; //Coordenadas vecinos
+  Point Pa, Pe; // Punto adjacente, punto evaluado
+  Fo.push_back(P);
+
+  while (!Fo.empty()){
+    Pe = Fo.back();
+    Fo.pop_back();
+    for(int i = 0; i < 4 ; i++){
+      Pa = Pe + vecinos[i];
+      Vec3b rgbChannelsA = K.at<Vec3b>(Pa.y,Pa.x); // Valores rgb en Pa de K (Matriz de regiones)
+      Vec3b rgbChannelsE = F.at<Vec3b>(Pa.y,Pa.x); // Valores rgb en Pa de F (Imagen de entrada)
+
+      //  if (Color(Pa)=0 and f(Pa)=1)
+      if(int(rgbChannelsA[0]) == 0 && int(rgbChannelsA[1]) == 0 && int(rgbChannelsA[2]) == 0 &&
+        int(rgbChannelsE[0]) == 255 && int(rgbChannelsE[1]) == 255 && int(rgbChannelsE[2]) == 255){
+          K.at<Vec3b>(Pa.y,Pa.x) = colors[coloringIndex];
+          Fo.push_back(Pa);
+      }
+      //
+    }
+  }
+}
+
+
+
 // Here we will store points
 vector<Point> points;
 vector<Point> histPoints;
+
+vector<Point> segSeeds;
 
 // Store values from image
 //vector<> values
@@ -50,10 +99,13 @@ int high_Y = 255, high_I = 255, high_Q = 255;
 /* Create images where captured and transformed frames are going to be stored */
 	Mat auxImage;
 	Mat hsv_thres;
+  Mat auxImage2;
+  Mat auxImage3;
 	Mat bgr_thres;
 	Mat yiq_thres;
 	Mat output;
 	Mat GUI;
+  Mat regiones; // matriz de segmentos
 
 
 	// Create image template for coloring
@@ -71,9 +123,12 @@ Vec3i maxRange;
 /* This is the callback that will only display mouse coordinates */
 void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* param);
 
+void mouseHSVregionCallback(int event, int x, int y, int flags, void* param);
+
 void bgrHistogram();
 void hsvHistogram();
 void yiqHistogram();
+void segmentar();
 
 
 // Function for conversion between RGB and YIQ spaces
@@ -126,7 +181,24 @@ void mod_HSV_threshold(int,void*)
 	cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
 	inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
 	currentImage.copyTo(output, hsv_thres);
-	imshow("HSV", hsv_thres);
+
+
+  // Graph seeds for segmentation in HSV window (HSV mask window)
+  if (!segSeeds.empty()){
+    vector<Mat> nueva;
+    nueva.push_back(hsv_thres);
+    nueva.push_back(hsv_thres);
+    nueva.push_back(hsv_thres);
+
+    merge(nueva, auxImage3);
+    for(Point i : segSeeds){
+      circle(auxImage3, i, 3, Scalar(255, 244, 30), -1);
+    }
+    imshow("HSV", auxImage3);
+  }else{
+    imshow("HSV", hsv_thres);
+  }
+
 	imshow("HSV Threshold", output);
 	output.release();
 }
@@ -243,7 +315,9 @@ int main(int argc, char *argv[])
     namedWindow("Image");
     setMouseCallback("Image", mouseCoordinatesExampleCallback);
 
+
     histPoints.push_back(Point(0,0));
+
 
 
     while (true)
@@ -251,7 +325,15 @@ int main(int argc, char *argv[])
 		if (!frozen){
 			/* Obtain a new frame from camera */
 			camera >> currentImage;
-		}
+      // Inicializar regiones con zeros
+      //regiones = Mat::zeros(currentImage.rows, currentImage.cols, CV_8UC3);
+
+      // Si la imagen no esta congelada y la ventana de regiones esta abierta
+      // segmentar las semillas y actualizar la imagen
+      if(!(getWindowProperty("Regiones", WND_PROP_AUTOSIZE) == -1)){
+        segmentar();
+      }
+    }
 
 		if (currentImage.data)
 		{
@@ -319,6 +401,7 @@ int main(int argc, char *argv[])
 				case 'h':
 					/* If 'h' is pressed, hsv tools */
 					imshow("HSV", currentImage);
+          setMouseCallback("HSV", mouseHSVregionCallback);
 					createTrackbar("Hmin", "HSV", &low_H, 255, mod_HSV_threshold);
 					createTrackbar("Hmax", "HSV", &high_H, 255, mod_HSV_threshold);
 					createTrackbar("Smin", "HSV", &low_S, 255, mod_HSV_threshold);
@@ -340,6 +423,13 @@ int main(int argc, char *argv[])
 						mod_YIQ_threshold(0,0);
             yiqHistogram();
 						break;
+        case 'c':
+            // If 'c' is pressed clean segSeeds vector
+            segSeeds.clear();
+            regiones = Mat::zeros(auxImage2.rows, auxImage2.cols, CV_8UC3);
+            imshow("Regiones", regiones);
+
+            break;
 				case 'x':
 					/* If 'x' is pressed, exit program */
 					closeP = true;
@@ -398,6 +488,50 @@ void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* p
 						// Call function to auto set color spaces ranges
 						getParameterRange();
 						points.clear();
+            break;
+    }
+}
+
+void segmentar(){
+  // Hay que corregir que hsv_thres viene con un solo canal, se debe pasar a 3 canales
+  vector<Mat> nueva;
+  nueva.push_back(hsv_thres);
+  nueva.push_back(hsv_thres);
+  nueva.push_back(hsv_thres);
+  merge(nueva, auxImage2);
+
+  // Create empty mat
+  regiones = Mat::zeros(auxImage2.rows, auxImage2.cols, CV_8UC3);
+
+  // Iterar sobre las semillas y segmentar
+  for(Point i : segSeeds){
+    // Obtener region
+    gotaDeAceite(i, regiones, auxImage2);
+    coloringIndex++;
+    // Pintar semillas
+    //circle(hsv_thres, i, 5, Scalar(0,0,255), -1);
+    // Falta actualizar imagen y aplicar filtro para que no afecte a la segmentacion
+  }
+  coloringIndex = 0;
+
+  // Imprimir region
+  imshow("Regiones", regiones);
+
+}
+
+// Callback para establecer region en HSV
+void mouseHSVregionCallback(int event, int x, int y, int flags, void* param)
+{
+    switch (event)
+    {
+        case CV_EVENT_LBUTTONDOWN:
+            segSeeds.push_back(Point(x,y));
+
+            // Make point object
+						Point P(x, y);
+
+            segmentar();
+
             break;
     }
 }
