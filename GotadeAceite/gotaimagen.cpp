@@ -46,9 +46,33 @@ int main(int argc, char *argv[]) {
   int vectorposy[4] = { 0,1,0,-1 };
 
 
+    
+    bool flag = true;
+    int cont;
+    int min=0;
+    int max;
+    int range;
+    while(flag == true){
+
+    		//select a pixel
+	  	max = gray.rows;
+		range = max - min + 1;
+		crow = rand() % range + min;
+
+		max = gray.cols;
+		range = max - min + 1;
+		ccol = rand() % range + min;
+
+    	grayval = (int)gray.at<uchar>( crow , ccol );
+
+        if (grayval==0){
+        	flag = false;
+        }
+    }
+
   // Fo = {P}
-  crow = 218;
-  ccol = 496;
+  //crow = 218;
+  //ccol = 496;
   fox.push_back(crow);
   foy.push_back(ccol);
 
