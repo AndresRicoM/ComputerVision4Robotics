@@ -15,7 +15,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <iostream>
-
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -25,12 +24,12 @@
 
 //#include <list>
 
- #define CV_CAST_8U
+#define CV_CAST_8U
 
 using namespace cv;
 using namespace std;
 
-// Arreglo para mapeado de identificador con color para segmentacion
+// Array to map segmentation id color
 Vec3i colors[5] ={
   Vec3i(255, 244, 30), // Light Blue
   Vec3i(51, 255, 255), // Yellow
@@ -41,38 +40,9 @@ Vec3i colors[5] ={
 
 int coloringIndex = 0;
 
-/* Funcion para ejecutar gota de aceite
- P = punto a expandir
- K = matriz de regiones
- F = imagen de entrada (binarizada)
-*/
-void gotaDeAceite(Point P, Mat K, Mat F){
-  //List for Gota de Aceite
-  //list<Point> Fo;
-  vector<Point> Fo; //Lista de puntos por procesar
-  Point vecinos[4] = {Point(0,1),Point(0,-1),Point(1,0),Point(-1,0)}; //Coordenadas vecinos
-  Point Pa, Pe; // Punto adjacente, punto evaluado
-  Fo.push_back(P);
-
-  while (!Fo.empty()){
-    Pe = Fo.back();
-    Fo.pop_back();
-    for(int i = 0; i < 4 ; i++){
-      Pa = Pe + vecinos[i];
-      Vec3b rgbChannelsA = K.at<Vec3b>(Pa.y,Pa.x); // Valores rgb en Pa de K (Matriz de regiones)
-      Vec3b rgbChannelsE = F.at<Vec3b>(Pa.y,Pa.x); // Valores rgb en Pa de F (Imagen de entrada)
-
-      //  if (Color(Pa)=0 and f(Pa)=1)
-      if(int(rgbChannelsA[0]) == 0 && int(rgbChannelsA[1]) == 0 && int(rgbChannelsA[2]) == 0 &&
-        int(rgbChannelsE[0]) == 255 && int(rgbChannelsE[1]) == 255 && int(rgbChannelsE[2]) == 255){
-          K.at<Vec3b>(Pa.y,Pa.x) = colors[coloringIndex];
-          Fo.push_back(Pa);
-      }
-      //
-    }
-  }
-}
-
+//global variables for bullsEye drawing
+int activeQuadrant = 0;
+int currentAngle = 20;
 
 
 // Here we will store points
@@ -80,9 +50,8 @@ vector<Point> points;
 vector<Point> histPoints;
 
 vector<Point> segSeeds;
+vector<Point> segSeedAux;
 
-// Store values from image
-//vector<> values
 
 // Frozen picture
 bool frozen = false, closeP=false;
@@ -91,21 +60,17 @@ int trackValue = 0;
 
 int low_H = 0, low_S = 0, low_V = 0;
 int high_H = 255, high_S = 255, high_V = 255;
-int low_R = 0, low_G = 0, low_B = 0;
-int high_R = 255, high_G = 255, high_B = 255;
-int low_Y = 0, low_I = 0, low_Q = 0;
-int high_Y = 255, high_I = 255, high_Q = 255;
+int iClosing = 5,iClosing2 = 5, iOpening = 5;
+
 
 /* Create images where captured and transformed frames are going to be stored */
 	Mat auxImage;
 	Mat hsv_thres;
-  Mat auxImage2;
   Mat auxImage3;
-	Mat bgr_thres;
-	Mat yiq_thres;
 	Mat output;
 	Mat GUI;
-  Mat regiones; // matriz de segmentos
+
+  Mat drawing = Mat::zeros( hsv_thres.size(), CV_8UC3 );
 
 
 	// Create image template for coloring
@@ -120,192 +85,30 @@ Vec3b channels;
 Vec3i minRange;
 Vec3i maxRange;
 
-/* This is the callback that will only display mouse coordinates */
-void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* param);
+/* This is the callback that will only display mouse coordinates and update parameter range*/
+void mouseOnMainImageCallback(int event, int x, int y, int flags, void* param);
 
 void mouseHSVregionCallback(int event, int x, int y, int flags, void* param);
 
-void bgrHistogram();
+void mod_HSV_threshold(int,void*);
+void getParameterRange();
 void hsvHistogram();
-void yiqHistogram();
-void segmentar();
+void drawBullsEye(int cuadrante, int angle);
+void openAndCloseFilter(int,void*);
+void updateSegContCen();
+void gotaDeAceite(Point seed, Mat outColored, Mat inputMat);
+Mat segmentar(Mat binaria);
+Mat getContours(Mat regiones);
+Point getMassCenter(Mat segmentos);
 
 
-// Function for conversion between RGB and YIQ spaces
-void rgb2yiq(const Mat img) {
-
-  uchar r, g, b;
-  double y, i, q;
-
-  Mat out_y(img.rows, img.cols, CV_8UC1);
-  Mat out_i(img.rows, img.cols, CV_8UC1);
-  Mat out_q(img.rows, img.cols, CV_8UC1);
-  Mat out(img.rows, img.cols, CV_8UC3);
-
-  /* convert image from RGB to YIQ */
-
-  int m=0, n=0;
-  for(m=0; m<img.rows; m++)
-  {
-    for(n=0; n<img.cols; n++)
-    {
-      r = img.data[m*img.step + n*3 + 2];
-      g = img.data[m*img.step + n*3 + 1];
-      b = img.data[m*img.step + n*3 ];
-      y = 0.299*r + 0.587*g + 0.114*b;
-      i = 0.596*r - 0.275*g - 0.321*b;
-      q = 0.212*r - 0.523*g + 0.311*b;
-
-      out_y.data[m*out_y.step+n] = y;
-      out_i.data[m*out_i.step+n] = CV_CAST_8U((int)(i));
-      out_q.data[m*out_q.step+n ] = CV_CAST_8U((int)(q));
-      out.data[m*img.step+n*3 +2] = y;
-      out.data[m*img.step+n*3 +1] = CV_CAST_8U((int)(i));
-      out.data[m*img.step+n*3 ] = CV_CAST_8U((int)(q));
-
-    }
-  }
-  out.copyTo(auxImage);
-}
-
-
-void modThreshold(int,void*)
-{
-	Mat tempImage;
-	threshold( auxImage, tempImage, trackValue, 255, 0);
-	imshow("B&W", tempImage);
-}
-
-void mod_HSV_threshold(int,void*)
-{
-	cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
-	inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
-	currentImage.copyTo(output, hsv_thres);
-
-
-  // Graph seeds for segmentation in HSV window (HSV mask window)
-  if (!segSeeds.empty()){
-    vector<Mat> nueva;
-    nueva.push_back(hsv_thres);
-    nueva.push_back(hsv_thres);
-    nueva.push_back(hsv_thres);
-
-    merge(nueva, auxImage3);
-    for(Point i : segSeeds){
-      circle(auxImage3, i, 3, Scalar(255, 244, 30), -1);
-    }
-    imshow("HSV", auxImage3);
-  }else{
-    imshow("HSV", hsv_thres);
-  }
-
-	imshow("HSV Threshold", output);
-	output.release();
-}
-
-void mod_BGR_threshold(int,void*)
-{
-	inRange(currentImage, Scalar(low_B, low_G, low_R), Scalar(high_B, high_G, high_R), bgr_thres);
-	currentImage.copyTo(output, bgr_thres);
-	imshow("RGB", bgr_thres);
-	imshow("RGB Threshold", output);
-	output.release();
-}
-
-void mod_YIQ_threshold(int,void*)
-{
-  rgb2yiq(currentImage);
-	inRange(auxImage, Scalar(low_Y, low_I, low_Q), Scalar(high_Y, high_I, high_Q), yiq_thres);
-	currentImage.copyTo(output, yiq_thres);
-	imshow("YIQ", yiq_thres);
-	imshow("YIQ Threshold", output);
-	output.release();
-}
-
-// Function to autoset ranges for thresholds in color spaces
-void getParameterRange(){
-	if(!(getWindowProperty("RGB", WND_PROP_AUTOSIZE) == -1)){
-		// Reset ranges for search
-		minRange = {255,255,255};
-		maxRange = {0,0,0};
-		// Scan image in range of selection
-		for(int i = 0; i<points[1].y-points[0].y; i++){
-			for(int j = 0; j<points[1].x-points[0].x; j++){
-				channels = currentImage.at<Vec3b>(points[0].y+i,points[0].x+j);
-				// Search for minimum and maximum
-				for(int k = 0; k<3; k++){
-					if (minRange[k]>channels[k]){
-						minRange[k]=channels[k];
-					}
-					if (maxRange[k]<channels[k]){
-						maxRange[k]=channels[k];
-					}
-				}
-			}
-		}
-		setTrackbarPos("Bmin", "RGB", minRange[0]);
-		setTrackbarPos("Gmin", "RGB", minRange[1]);
-		setTrackbarPos("Rmin", "RGB", minRange[2]);
-		setTrackbarPos("Bmax", "RGB", maxRange[0]);
-		setTrackbarPos("Gmax", "RGB", maxRange[1]);
-		setTrackbarPos("Rmax", "RGB", maxRange[2]);
-	}else if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1)){
-		// Reset ranges for search
-		minRange = {255,255,255};
-		maxRange = {0,0,0};
-		// Scan image in range of selection
-		for(int i = 0; i<points[1].y-points[0].y; i++){
-			for(int j = 0; j<points[1].x-points[0].x; j++){
-				channels = auxImage.at<Vec3b>(points[0].y+i,points[0].x+j);
-				// Search for minimum and maximum
-				for(int k = 0; k<3; k++){
-					if (minRange[k]>channels[k]){
-						minRange[k]=channels[k];
-					}
-					if (maxRange[k]<channels[k]){
-						maxRange[k]=channels[k];
-					}
-				}
-			}
-		}
-		setTrackbarPos("Hmin", "HSV", minRange[0]-1);
-		setTrackbarPos("Smin", "HSV", minRange[1]-30);
-		setTrackbarPos("Vmin", "HSV", minRange[2]-25);
-		setTrackbarPos("Hmax", "HSV", maxRange[0]+1);
-		setTrackbarPos("Smax", "HSV", maxRange[1]+30);
-		setTrackbarPos("Vmax", "HSV", maxRange[2]+25);
-	}else if(!(getWindowProperty("YIQ", WND_PROP_AUTOSIZE) == -1)){
-		// Reset ranges for search
-		minRange = {255,255,255};
-		maxRange = {0,0,0};
-		// Scan image in range of selection
-		for(int i = 0; i<points[1].y-points[0].y; i++){
-			for(int j = 0; j<points[1].x-points[0].x; j++){
-				channels = auxImage.at<Vec3b>(points[0].y+i,points[0].x+j);
-				// Search for minimum and maximum
-				for(int k = 0; k<3; k++){
-					if (minRange[k]>channels[k]){
-						minRange[k]=channels[k];
-					}
-					if (maxRange[k]<channels[k]){
-						maxRange[k]=channels[k];
-					}
-				}
-			}
-		}
-		setTrackbarPos("Ymin", "YIQ", minRange[0]);
-		setTrackbarPos("Imin", "YIQ", minRange[1]);
-		setTrackbarPos("Qmin", "YIQ", minRange[2]);
-		setTrackbarPos("Ymax", "YIQ", maxRange[0]);
-		setTrackbarPos("Imax", "YIQ", maxRange[1]);
-		setTrackbarPos("Qmax", "YIQ", maxRange[2]);
-	}
-
-}
-
-
+/* --------------------------------------------------------------------------------------*
+ * #####   MAIN  ######                                                 					       *
+ * ------------------------------------------------------------------------------------- */
 int main(int argc, char *argv[])
 {
+  bool histogramOn = false;
+  bool bullsEyeOn = false;
 	/* First, open camera device */
 	VideoCapture camera;
     camera.open(0);
@@ -313,141 +116,141 @@ int main(int argc, char *argv[])
 
     /* Create main OpenCV window to attach callbacks */
     namedWindow("Image");
-    setMouseCallback("Image", mouseCoordinatesExampleCallback);
+    setMouseCallback("Image", mouseOnMainImageCallback);
 
 
     histPoints.push_back(Point(0,0));
 
 
-
     while (true)
-	{
-		if (!frozen){
-			/* Obtain a new frame from camera */
-			camera >> currentImage;
-      // Inicializar regiones con zeros
-      //regiones = Mat::zeros(currentImage.rows, currentImage.cols, CV_8UC3);
+    {
+  		if (!frozen)
+      {
+  			/* Obtain a new frame from camera */
+  			camera >> currentImage;
+        // Inicializar regiones con zeros
+        //regiones = Mat::zeros(currentImage.rows, currentImage.cols, CV_8UC3);
 
-      // Si la imagen no esta congelada y la ventana de regiones esta abierta
-      // segmentar las semillas y actualizar la imagen
-      if(!(getWindowProperty("Regiones", WND_PROP_AUTOSIZE) == -1)){
-        segmentar();
+        // Si la imagen no esta congelada y la ventana de regiones esta abierta
+        // segmentar las semillas y actualizar la imagen
+        if(!(getWindowProperty("Segmentos", WND_PROP_AUTOSIZE) == -1))
+        {
+          updateSegContCen();
+        }
       }
+
+  		if (currentImage.data)
+  		{
+  			// copy contents from camera to graphic user interface image
+  			currentImage.copyTo(GUI);
+
+  			// paint range selection rectangle on screen (GUI)
+  			if (points.size() > 1)
+        {
+  				rectangle(GUI, (Point)points[0], (Point)points[1], Scalar( 0, 255, 0 ), 1, 8, 0);
+  			}
+
+
+  			/* Show GUI on main window */
+  			imshow("Image", GUI);
+        moveWindow("Image", 0, 0);
+        if(!frozen)
+        {
+          if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1))
+          {
+            mod_HSV_threshold(0,0);
+            if(histogramOn)
+            {
+              hsvHistogram();
+            }
+          }
+          if(!(getWindowProperty("bullsEye", WND_PROP_AUTOSIZE) == -1))
+          {
+            drawBullsEye(activeQuadrant, currentAngle);
+          }
+        }
+        else
+        {
+          if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1) && histogramOn)
+          {
+            hsvHistogram();
+          }
+        }
+
+
+  			// Keypress actions
+  			switch(waitKey(3))
+        {
+  				case 'f':
+  					/* If 'f' is pressed, freeze image */
+  					frozen = not frozen;
+  					break;
+  				case 'h':
+  					/* If 'h' is pressed, hsv tools */
+  					imshow("HSV", currentImage);
+            moveWindow("HSV", 650, 0);
+            setMouseCallback("HSV", mouseHSVregionCallback);
+  					createTrackbar("Hmin", "HSV", &low_H, 255, mod_HSV_threshold);
+  					createTrackbar("Hmax", "HSV", &high_H, 255, mod_HSV_threshold);
+  					createTrackbar("Smin", "HSV", &low_S, 255, mod_HSV_threshold);
+  					createTrackbar("Smax", "HSV", &high_S, 255, mod_HSV_threshold);
+  					createTrackbar("Vmin", "HSV", &low_V, 255, mod_HSV_threshold);
+  					createTrackbar("Vmax", "HSV", &high_V, 255, mod_HSV_threshold);
+            createTrackbar("Closing", "HSV", &iClosing, 10, openAndCloseFilter);
+            createTrackbar("Opening", "HSV", &iOpening, 10, openAndCloseFilter);
+            createTrackbar("Closing2", "HSV", &iClosing2, 10, openAndCloseFilter);
+  					mod_HSV_threshold(0,0);
+  					break;
+          case 'c':
+              // If 'c' is pressed clean segSeeds vector
+              segSeeds.clear();
+
+              imshow("Segmentos", Mat::zeros(hsv_thres.rows, hsv_thres.cols, CV_8UC3));
+
+              break;
+          case 'i':
+              // Toggle histograms
+              if(!(getWindowProperty("Histogram H", WND_PROP_AUTOSIZE) == -1)){
+                destroyWindow("Histogram H");
+              }
+              if(!(getWindowProperty("Histogram S", WND_PROP_AUTOSIZE) == -1)){
+                destroyWindow("Histogram S");
+              }
+              if(!(getWindowProperty("Histogram V", WND_PROP_AUTOSIZE) == -1)){
+                destroyWindow("Histogram V");
+              }
+              histogramOn = !histogramOn;
+              break;
+          case 'b':
+              // Toggle bullsEye
+              if(!(getWindowProperty("bullsEye", WND_PROP_AUTOSIZE) == -1))
+              {
+                destroyWindow("bullsEye");
+              }
+              else
+              {
+                drawBullsEye(activeQuadrant, currentAngle);
+              }
+              bullsEyeOn = !bullsEyeOn;
+              break;
+  				case 'x':
+  					/* If 'x' is pressed, exit program */
+  					closeP = true;
+  					break;
+  			}
+  			if (closeP) break;
+  		}
+  		else
+  		{
+  			cout << "No image data.. " << endl;
+  		}
     }
-
-		if (currentImage.data)
-		{
-			// copy contents from camera to graphic user interface image
-			currentImage.copyTo(GUI);
-
-			// paint range selection rectangle on screen (GUI)
-			if (points.size() > 1) {
-				rectangle(GUI, (Point)points[0], (Point)points[1], Scalar( 0, 255, 0 ), 1, 8, 0);
-			}
-
-
-			/* Show GUI on main window */
-			imshow("Image", GUI);
-      if(!frozen){
-        if(!(getWindowProperty("RGB", WND_PROP_AUTOSIZE) == -1)){
-          mod_BGR_threshold(0,0);
-          bgrHistogram();
-        }
-        if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1)){
-          mod_HSV_threshold(0,0);
-          hsvHistogram();
-        }
-        if(!(getWindowProperty("YIQ", WND_PROP_AUTOSIZE) == -1)){
-          mod_YIQ_threshold(0,0);
-          yiqHistogram();
-        }
-      }else{
-        if(!(getWindowProperty("RGB", WND_PROP_AUTOSIZE) == -1)){
-          bgrHistogram();
-        }
-        if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1)){
-          hsvHistogram();
-        }
-        if(!(getWindowProperty("YIQ", WND_PROP_AUTOSIZE) == -1)){
-          yiqHistogram();
-        }
-      }
-
-
-			// Keypress actions
-			switch(waitKey(3)){
-				case 'f':
-					/* If 'f' is pressed, freeze image */
-					frozen = not frozen;
-					break;
-				case 'b':
-					/* If 'b' is pressed, b&w tools */
-					cvtColor(currentImage, auxImage, cv::COLOR_BGR2GRAY);
-					imshow("B&W", auxImage);
-					createTrackbar("Umbral", "B&W", &trackValue, 255, modThreshold);
-					break;
-				case 'r':
-					/* If 'r' is pressed, rgb tools */
-					bgrHistogram();
-					imshow("RGB", currentImage);
-					createTrackbar("Bmin", "RGB", &low_B, 255, mod_BGR_threshold);
-					createTrackbar("Bmax", "RGB", &high_B, 255, mod_BGR_threshold);
-					createTrackbar("Gmin", "RGB", &low_G, 255, mod_BGR_threshold);
-					createTrackbar("Gmax", "RGB", &high_G, 255, mod_BGR_threshold);
-					createTrackbar("Rmin", "RGB", &low_R, 255, mod_BGR_threshold);
-					createTrackbar("Rmax", "RGB", &high_R, 255, mod_BGR_threshold);
-					mod_BGR_threshold(0,0);
-					break;
-				case 'h':
-					/* If 'h' is pressed, hsv tools */
-					imshow("HSV", currentImage);
-          setMouseCallback("HSV", mouseHSVregionCallback);
-					createTrackbar("Hmin", "HSV", &low_H, 255, mod_HSV_threshold);
-					createTrackbar("Hmax", "HSV", &high_H, 255, mod_HSV_threshold);
-					createTrackbar("Smin", "HSV", &low_S, 255, mod_HSV_threshold);
-					createTrackbar("Smax", "HSV", &high_S, 255, mod_HSV_threshold);
-					createTrackbar("Vmin", "HSV", &low_V, 255, mod_HSV_threshold);
-					createTrackbar("Vmax", "HSV", &high_V, 255, mod_HSV_threshold);
-					mod_HSV_threshold(0,0);
-          hsvHistogram();
-					break;
-				case 'y':
-						/* If 'y' is pressed, yiq tools */
-						imshow("YIQ", currentImage);
-						createTrackbar("Ymin", "YIQ", &low_Y, 255, mod_YIQ_threshold);
-						createTrackbar("Ymax", "YIQ", &high_Y, 255, mod_YIQ_threshold);
-						createTrackbar("Imin", "YIQ", &low_I, 255, mod_YIQ_threshold);
-						createTrackbar("Imax", "YIQ", &high_I, 255, mod_YIQ_threshold);
-						createTrackbar("Qmin", "YIQ", &low_Q, 255, mod_YIQ_threshold);
-						createTrackbar("Qmax", "YIQ", &high_Q, 255, mod_YIQ_threshold);
-						mod_YIQ_threshold(0,0);
-            yiqHistogram();
-						break;
-        case 'c':
-            // If 'c' is pressed clean segSeeds vector
-            segSeeds.clear();
-            regiones = Mat::zeros(auxImage2.rows, auxImage2.cols, CV_8UC3);
-            imshow("Regiones", regiones);
-
-            break;
-				case 'x':
-					/* If 'x' is pressed, exit program */
-					closeP = true;
-					break;
-			}
-			if (closeP) break;
-
-
-		}
-		else
-		{
-			cout << "No image data.. " << endl;
-		}
-	}
 }
 
-
-void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* param)
+/* --------------------------------------------------------------------------------------*
+ * ----   Callback for mouse clicks on main Window          ----          	  		       *
+ * ------------------------------------------------------------------------------------- */
+void mouseOnMainImageCallback(int event, int x, int y, int flags, void* param)
 {
     switch (event)
     {
@@ -464,9 +267,6 @@ void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* p
             if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1)){
               Vec3b auxChannels = auxImage.at<Vec3b>(y,x);
               cout << "H: " << int(auxChannels[0])<< " S: " << int(auxChannels[1])<< " V: " << int(auxChannels[2])<<endl;
-            }else if(!(getWindowProperty("YIQ", WND_PROP_AUTOSIZE) == -1)){
-              Vec3b auxChannels = auxImage.at<Vec3b>(y,x);
-              cout << "Y: " << int(auxChannels[0])<< " I: " << int(auxChannels[1])<< " Q: " << int(auxChannels[2])<<endl;
             }else{
               cout << "B: " << int(channels[0])<< " G: " << int(channels[1])<< " R: " << int(channels[2])<<endl;
             }
@@ -492,122 +292,151 @@ void mouseCoordinatesExampleCallback(int event, int x, int y, int flags, void* p
     }
 }
 
-void segmentar(){
-  // Hay que corregir que hsv_thres viene con un solo canal, se debe pasar a 3 canales
-  vector<Mat> nueva;
-  nueva.push_back(hsv_thres);
-  nueva.push_back(hsv_thres);
-  nueva.push_back(hsv_thres);
-  merge(nueva, auxImage2);
-
-  // Create empty mat
-  regiones = Mat::zeros(auxImage2.rows, auxImage2.cols, CV_8UC3);
-
-  // Iterar sobre las semillas y segmentar
-  for(Point i : segSeeds){
-    // Obtener region
-    gotaDeAceite(i, regiones, auxImage2);
-    coloringIndex++;
-    // Pintar semillas
-    //circle(hsv_thres, i, 5, Scalar(0,0,255), -1);
-    // Falta actualizar imagen y aplicar filtro para que no afecte a la segmentacion
-  }
-  coloringIndex = 0;
-
-  // Imprimir region
-  imshow("Regiones", regiones);
-
-}
-
-// Callback para establecer region en HSV
+/* --------------------------------------------------------------------------------------*
+ * ----   Callback for mouse click on HSV threshold window   ----      		               *
+ *           -Adds a segmentation Seed                                                   *
+ * ------------------------------------------------------------------------------------- */
 void mouseHSVregionCallback(int event, int x, int y, int flags, void* param)
 {
     switch (event)
     {
         case CV_EVENT_LBUTTONDOWN:
+
             segSeeds.push_back(Point(x,y));
-
-            // Make point object
-						Point P(x, y);
-
-            segmentar();
+            //Push_front
+            //segSeeds.emplace ( segSeeds.begin()+segSeeds.size(), Point(x,y) );
+            updateSegContCen();
 
             break;
     }
 }
 
-void bgrHistogram(){
-	/// Separate the image in 3 places ( B, G and R )
-  vector<Mat> bgr_planes;
-  split( currentImage, bgr_planes );
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to update Segmentation, Contours, and Centroids   ----      		       *
+ * ------------------------------------------------------------------------------------- */
+void updateSegContCen()
+{
+  // Get segments
+  Mat segmentos = Mat::zeros( hsv_thres.size(), CV_8UC3 );
+  segmentos = segmentar(hsv_thres);
 
-  /// Establish the number of bins
-  int histSize = 256;
+  Mat segmentosGris = Mat::zeros( hsv_thres.size(), CV_8UC1 );
+  cvtColor(segmentos, segmentosGris, cv::COLOR_BGR2GRAY);
 
-  /// Set the ranges ( for B,G,R) )
-  float range[] = { 0, 256 } ;
-  const float* histRange = { range };
-
-  bool uniform = true; bool accumulate = false;
-
-  Mat b_hist, g_hist, r_hist;
-
-  /// Compute the histograms:
-  calcHist( &bgr_planes[0], 1, 0, Mat(), b_hist, 1, &histSize, &histRange, uniform, accumulate );
-  calcHist( &bgr_planes[1], 1, 0, Mat(), g_hist, 1, &histSize, &histRange, uniform, accumulate );
-  calcHist( &bgr_planes[2], 1, 0, Mat(), r_hist, 1, &histSize, &histRange, uniform, accumulate );
-
-  // Draw the histograms for B, G and R
-  int hist_w = 512; int hist_h = 400;
-  int bin_w = cvRound( (double) hist_w/histSize );
-
-	Mat histImageB( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
-	Mat histImageG( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
-	Mat histImageR( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
-
-  /// Normalize the result to [ 0, histImage.rows ]
-  normalize(b_hist, b_hist, 0, histImageB.rows, NORM_MINMAX, -1, Mat() );
-  normalize(g_hist, g_hist, 0, histImageB.rows, NORM_MINMAX, -1, Mat() );
-  normalize(r_hist, r_hist, 0, histImageB.rows, NORM_MINMAX, -1, Mat() );
-
-  /// Draw for each channel
-  for( int i = 1; i < histSize; i++ )
-  {
-      line( histImageB, Point( bin_w*(i-1), hist_h - cvRound(b_hist.at<float>(i-1)) ) ,
-                       Point( bin_w*(i), hist_h - cvRound(b_hist.at<float>(i)) ),
-                       Scalar( 255, 0, 0), 2, 8, 0  );
-      line( histImageG, Point( bin_w*(i-1), hist_h - cvRound(g_hist.at<float>(i-1)) ) ,
-                       Point( bin_w*(i), hist_h - cvRound(g_hist.at<float>(i)) ),
-                       Scalar( 0, 255, 0), 2, 8, 0  );
-      line( histImageR, Point( bin_w*(i-1), hist_h - cvRound(r_hist.at<float>(i-1)) ) ,
-                       Point( bin_w*(i), hist_h - cvRound(r_hist.at<float>(i)) ),
-                       Scalar( 0, 0, 255), 2, 8, 0  );
+  // Get contours
+  Mat contoursMat = Mat::zeros( segmentos.size(), CV_8UC3 );
+  contoursMat = getContours(segmentos);
+  //Pintar centros
+  for(Point i : segSeeds){
+    circle(contoursMat, i, 3, 255, -1);
   }
-
-  // Draw point values on histograms as lines
-  Vec3b chan = currentImage.at<Vec3b>(histPoints[0].y, histPoints[0].x);
-
-  float b = float(chan[0])*(float(hist_w)/255);
-  float g = float(chan[1])*(float(hist_w)/255);
-  float r = float(chan[2])*(float(hist_w)/255);
-
-  line(histImageB, Point(int(b), 0), Point(int(b), hist_h), Scalar( 255, 255, 255 ), 1, 8, 0);
-  line(histImageG, Point(int(g), 0), Point(int(g), hist_h), Scalar( 255, 255, 255 ), 1, 8, 0);
-  line(histImageR, Point(int(r), 0), Point(int(r), hist_h), Scalar( 255, 255, 255 ), 1, 8, 0);
-
-  /// Display
-  namedWindow("Histogram B", CV_WINDOW_AUTOSIZE );
-  imshow("Histogram B", histImageB );
-	namedWindow("Histogram G", CV_WINDOW_AUTOSIZE );
-  imshow("Histogram G", histImageG );
-	namedWindow("Histogram R", CV_WINDOW_AUTOSIZE );
-  imshow("Histogram R", histImageR );
-
-  moveWindow("Histogram B", 0, 600);
-  moveWindow("Histogram G", 600, 600);
-  moveWindow("Histogram R", 1200, 600);
+  // Print segments
+  imshow("Segmentos", segmentos);
+  // Print contours
+  imshow("Contornos", contoursMat);
+  ~Mat(segmentos);
+  ~Mat(contoursMat);
 }
 
+// Segmentar Mat(CV_8UC1) binarizada y regresar Mat(CV_8UC3) coloreada por segmentos
+Mat segmentar(Mat binaria){
+  Mat segmentosOut;
+  Mat auxSeg;
+  // Hay que corregir que Mat binaria viene con un solo canal, se debe pasar a 3 canales
+  vector<Mat> nueva;
+  nueva.push_back(binaria);
+  nueva.push_back(binaria);
+  nueva.push_back(binaria);
+  merge(nueva, auxSeg);
+
+  // Create empty mat
+  segmentosOut = Mat::zeros(auxSeg.rows, auxSeg.cols, CV_8UC3);
+
+  segSeedAux.clear();
+  // Iterar sobre las semillas y segmentar
+  for(Point i : segSeeds){
+    // Obtener region
+    gotaDeAceite(i, segmentosOut, auxSeg);
+    coloringIndex++;
+  }
+
+  segSeeds = segSeedAux;
+  coloringIndex = 0;
+
+  return segmentosOut;
+}
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Callback for manipulation of HSV threshold trackbars   ----                    *
+ * ------------------------------------------------------------------------------------- */
+void mod_HSV_threshold(int,void*)
+{
+	cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
+	inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
+	currentImage.copyTo(output, hsv_thres);
+
+  //Apply dilation filter on hsv_thres
+  openAndCloseFilter(0,0);
+
+
+  // Graph seeds for segmentation in HSV window (HSV mask window)
+  if (!segSeeds.empty()){
+    vector<Mat> nueva;
+    nueva.push_back(hsv_thres);
+    nueva.push_back(hsv_thres);
+    nueva.push_back(hsv_thres);
+
+    merge(nueva, auxImage3);
+    for(Point i : segSeeds){
+      circle(auxImage3, i, 3, Scalar(255, 244, 30), -1);
+    }
+    imshow("HSV", auxImage3);
+  }else{
+    imshow("HSV", hsv_thres);
+  }
+
+	imshow("HSV Threshold", output);
+  moveWindow("HSV Threshold", 1300, 0);
+	output.release();
+}
+
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to autoset ranges for thresholds in color spaces   ----               *
+ * ------------------------------------------------------------------------------------- */
+void getParameterRange()
+{
+	if(!(getWindowProperty("HSV", WND_PROP_AUTOSIZE) == -1)){
+		// Reset ranges for search
+		minRange = {255,255,255};
+		maxRange = {0,0,0};
+		// Scan image in range of selection
+		for(int i = 0; i<points[1].y-points[0].y; i++){
+			for(int j = 0; j<points[1].x-points[0].x; j++){
+				channels = auxImage.at<Vec3b>(points[0].y+i,points[0].x+j);
+				// Search for minimum and maximum
+				for(int k = 0; k<3; k++){
+					if (minRange[k]>channels[k]){
+						minRange[k]=channels[k];
+					}
+					if (maxRange[k]<channels[k]){
+						maxRange[k]=channels[k];
+					}
+				}
+			}
+		}
+		setTrackbarPos("Hmin", "HSV", minRange[0]-1);
+		setTrackbarPos("Smin", "HSV", minRange[1]-30);
+		setTrackbarPos("Vmin", "HSV", minRange[2]-25);
+		setTrackbarPos("Hmax", "HSV", maxRange[0]+1);
+		setTrackbarPos("Smax", "HSV", maxRange[1]+30);
+		setTrackbarPos("Vmax", "HSV", maxRange[2]+25);
+	}
+}
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to obtain and graph histograms for HSV   ----      	        	       *
+ * ------------------------------------------------------------------------------------- */
 void hsvHistogram(){
 	/// Separate the image in 3 places ( H, S and V )
   vector<Mat> hsv_planes;
@@ -680,74 +509,161 @@ void hsvHistogram(){
   moveWindow("Histogram V", 1200, 600);
 }
 
-void yiqHistogram(){
-	/// Separate the image in 3 places ( Y, I and Q )
-  vector<Mat> yiq_planes;
-  split( auxImage, yiq_planes );
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to draw BullsEye with active quadrant and angle line   ----      	   *
+ * ------------------------------------------------------------------------------------- */
+void drawBullsEye(int cuadrante, int angle)
+{
+  double pi = 3.1415926535897;
+  int height=500, width=500;
+  int cRadius=200;
+  int c1=1, c2=1, c3=1, c4=1;
+  // create mat object to draw on
+  Mat eye(height, width, CV_8UC3);
+  //paint it white
+  eye.setTo(Scalar(255,255,255));
 
-  /// Establish the number of bins
-  int histSize = 256;
-
-  /// Set the ranges ( for H,S,V) )
-  float range[] = { 0, 256 } ;
-  const float* histRange = { range };
-
-  bool uniform = true; bool accumulate = false;
-
-  Mat y_hist, i_hist, q_hist;
-
-  /// Compute the histograms:
-  calcHist( &yiq_planes[0], 1, 0, Mat(), y_hist, 1, &histSize, &histRange, uniform, accumulate );
-  calcHist( &yiq_planes[1], 1, 0, Mat(), i_hist, 1, &histSize, &histRange, uniform, accumulate );
-  calcHist( &yiq_planes[2], 1, 0, Mat(), q_hist, 1, &histSize, &histRange, uniform, accumulate );
-
-  // Draw the histograms for H, S and V
-  int hist_w = 512; int hist_h = 400;
-  int bin_w = cvRound( (double) hist_w/histSize );
-
-	Mat histImageY( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
-	Mat histImageI( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
-	Mat histImageQ( hist_h, hist_w, CV_8UC3, Scalar( 0,0,0) );
-
-  /// Normalize the result to [ 0, histImage.rows ]
-  normalize(y_hist, y_hist, 0, histImageY.rows, NORM_MINMAX, -1, Mat() );
-  normalize(i_hist, i_hist, 0, histImageY.rows, NORM_MINMAX, -1, Mat() );
-  normalize(q_hist, q_hist, 0, histImageY.rows, NORM_MINMAX, -1, Mat() );
-
-  /// Draw for each channel
-  for( int i = 1; i < histSize; i++ )
-  {
-      line( histImageY, Point( bin_w*(i-1), hist_h - cvRound(y_hist.at<float>(i-1)) ) ,
-                       Point( bin_w*(i), hist_h - cvRound(y_hist.at<float>(i)) ),
-                       Scalar( 255, 0, 0), 2, 8, 0  );
-      line( histImageI, Point( bin_w*(i-1), hist_h - cvRound(i_hist.at<float>(i-1)) ) ,
-                       Point( bin_w*(i), hist_h - cvRound(i_hist.at<float>(i)) ),
-                       Scalar( 0, 255, 0), 2, 8, 0  );
-      line( histImageQ, Point( bin_w*(i-1), hist_h - cvRound(q_hist.at<float>(i-1)) ) ,
-                       Point( bin_w*(i), hist_h - cvRound(q_hist.at<float>(i)) ),
-                       Scalar( 0, 0, 255), 2, 8, 0  );
+  //Fill respective quadrant
+  switch (cuadrante){
+    case 1: c1 = -1; break;
+    case 2: c2 = -1; break;
+    case 3: c3 = -1; break;
+    case 4: c4 = -1; break;
+    default: break;
   }
 
-  // Draw point values on histograms as lines
-  Vec3b chan = auxImage.at<Vec3b>(histPoints[0].y, histPoints[0].x);
+  //draw circle quarters
+  ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 0, 90, Scalar( 0, 0, 255 ), c4, 8, 0);
+  ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 90, 180, Scalar( 0, 0, 255 ), c3, 8, 0);
+  ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 180, 270, Scalar( 0, 0, 255 ), c2, 8, 0);
+  ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 270, 360, Scalar( 0, 0, 255 ), c1, 8, 0);
 
-  float y = float(chan[0])*(float(hist_w)/255);
-  float i = float(chan[1])*(float(hist_w)/255);
-  float q = float(chan[2])*(float(hist_w)/255);
+  //draw red axis
+  line(eye, Point(0, height/2), Point(width, height/2), Scalar( 0, 0, 255 ), 1, 8, 0);
+  line(eye, Point(width/2, 0), Point(width/2, height), Scalar( 0, 0, 255 ), 1, 8, 0);
 
-  line(histImageY, Point(int(y), 0), Point(int(y), hist_h), Scalar( 255, 255, 255 ), 1, 8, 0);
-  line(histImageI, Point(int(i), 0), Point(int(i), hist_h), Scalar( 255, 255, 255 ), 1, 8, 0);
-  line(histImageQ, Point(int(q), 0), Point(int(q), hist_h), Scalar( 255, 255, 255 ), 1, 8, 0);
+  //Draw angle line
+  int angleX = cRadius * cos((-angle*pi)/180);
+  int angleY = cRadius * sin((-angle*pi)/180);
+  line(eye, Point(width/2+angleX, height/2+angleY), Point(width/2-angleX, height/2-angleY), Scalar( 255, 0, 0), 1, 8, 0);
 
-  /// Display
-  namedWindow("Histogram Y", CV_WINDOW_AUTOSIZE );
-  imshow("Histogram Y", histImageY );
-	namedWindow("Histogram I", CV_WINDOW_AUTOSIZE );
-  imshow("Histogram I", histImageI );
-	namedWindow("Histogram Q", CV_WINDOW_AUTOSIZE );
-  imshow("Histogram Q", histImageQ );
+  imshow("bullsEye", eye);
+  moveWindow("bullsEye", 0, 600);
+}
 
-  moveWindow("Histogram Y", 0, 600);
-  moveWindow("Histogram I", 600, 600);
-  moveWindow("Histogram Q", 1200, 600);
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to apply opening and closing filter to Mat object   ----         	   *
+ * ------------------------------------------------------------------------------------- */
+void openAndCloseFilter(int,void*)
+{
+  int operation_Closing = 3; // Closing morphologyEx
+  int operation_Opening = 2; // Opening morphologyEx
+
+
+  Mat element1 = getStructuringElement( 0, Size( 2*iClosing + 1, 2*iClosing+1 ), Point( iClosing, iClosing ) );
+  Mat element2 = getStructuringElement( 0, Size( 2*iOpening + 1, 2*iOpening+1 ), Point( iOpening, iOpening ) );
+  Mat element3 = getStructuringElement( 0, Size( 2*iClosing2 + 1, 2*iClosing2+1 ), Point( iClosing2, iClosing2 ) );
+  /// Apply the specified morphology operation
+  //blur( hsv_thres, hsv_thres, Size(5,5) );
+
+  morphologyEx( hsv_thres, hsv_thres, operation_Closing, element1 );
+  morphologyEx( hsv_thres, hsv_thres, operation_Opening, element2 );
+  morphologyEx( hsv_thres, hsv_thres, operation_Closing, element3 );
+}
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to obtain contours from Mat object   ----         	                   *
+ * ------------------------------------------------------------------------------------- */
+Mat getContours(Mat regiones)
+{
+
+
+  RNG rng(12345);
+
+  vector<vector<Point> > contours;
+  vector<Vec4i> hierarchy;
+
+  Mat contoursMat = Mat::zeros( regiones.size(), CV_8UC3 );
+  //Convert
+  cvtColor(regiones, contoursMat, cv::COLOR_BGR2GRAY);
+  /// Find contours
+  findContours( contoursMat, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
+
+  contoursMat = Mat::zeros( regiones.size(), CV_8UC1);
+
+  for( size_t i = 0; i< contours.size(); i++ )
+  {
+    //Find the area of contour
+    double a=contourArea( contours[i],false);
+    //if a> largest_area
+    if(a>300)
+    {
+      Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+      drawContours( contoursMat, contours, (int)i, color, 2, 8, hierarchy, 0, Point() );
+    }
+  }
+  return contoursMat;
+}
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to obtain centroid of binary mat object   ----         	             *
+ *            -returns a Point                                                           *
+ * ------------------------------------------------------------------------------------- */
+Point getMassCenter(Mat segmentos){
+  // Create empty mat
+  Moments m = moments(segmentos, true);
+  Point center(m.m10/m.m00, m.m01/m.m00);
+
+  return center;
+}
+
+/* --------------------------------------------------------------------------------------*
+ * ----   Function to apply "Gota de Aceite" segmentation on Seed (Point P) ----         *
+ *            -P = segmentation seed ; outColored = colored output mat ;                 *
+ *            -inputMat = input binary Mat                                               *
+ *            -calls get mass center to get centroid of each segment                     *                                       *
+ * ------------------------------------------------------------------------------------- */
+void gotaDeAceite(Point seed, Mat outColored, Mat inputMat){
+  Mat segmentToMomento = Mat::zeros( outColored.rows, outColored.cols, CV_8UC1 );
+
+  //List for Gota de Aceite
+  //list<Point> Fo;
+  vector<Point> Fo; //Lista de puntos por procesar
+  Point vecinos[4] = {Point(0,1),Point(0,-1),Point(1,0),Point(-1,0)}; //Coordenadas vecinos
+  Point Pa, Pe; // Punto adjacente, punto evaluado
+  Fo.push_back(seed);
+
+  while (!Fo.empty()){
+    Pe = Fo.back();
+    Fo.pop_back();
+    for(int i = 0; i < 4 ; i++){
+      Pa = Pe + vecinos[i];
+      Vec3b rgbChannelsA = outColored.at<Vec3b>(Pa.y,Pa.x); // Valores rgb en Pa de outColored (Matriz de segmentos)
+      Vec3b rgbChannelsE = inputMat.at<Vec3b>(Pa.y,Pa.x); // Valores rgb en Pa de inputMat (Imagen de entrada)
+
+      //  if (Color(Pa)=0 and f(Pa)=1)
+      if(int(rgbChannelsA[0]) == 0 && int(rgbChannelsA[1]) == 0 && int(rgbChannelsA[2]) == 0 &&
+        int(rgbChannelsE[0]) == 255 && int(rgbChannelsE[1]) == 255 && int(rgbChannelsE[2]) == 255){
+          //Segment for colorfull mat feedback
+          outColored.at<Vec3b>(Pa.y,Pa.x) = colors[coloringIndex];
+          //Segment to get individual momentos
+          segmentToMomento.at<uchar>(Pa.y,Pa.x) = 255;
+          Fo.push_back(Pa);
+      }
+      //
+    }
+  }
+
+  // Swap original segSeed location with center of mass of segment
+  Point center = getMassCenter(segmentToMomento);
+  if((center.x>0)&&(center.x<segmentToMomento.cols))
+  {
+    //update seed for segmentation with mass center
+    //segSeeds.pop_back();
+    //Push_front
+    //segSeeds.emplace ( segSeeds.begin()+segSeeds.size(), center );
+
+    segSeedAux.push_back(center);
+  }
 }
