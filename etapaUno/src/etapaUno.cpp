@@ -94,16 +94,20 @@ void mouseHSVregionCallback(int event, int x, int y, int flags, void* param);
 void mod_HSV_threshold(int,void*);
 void getParameterRange();
 void hsvHistogram();
-void drawBullsEye(int cuadrante, int angle);
+void drawBullsEye();
 void openAndCloseFilter(int,void*);
 void updateSegContCen();
 void gotaDeAceite(Point seed, Mat outColored, Mat inputMat);
-void find_moments(Mat bin, ofstream &myfile);
+void find_moments(Mat segmentMoment, ofstream &myfile);
+void plotF1F2(double fi[2]);
 Mat segmentar(Mat binaria);
 Mat getContours(Mat regiones);
 Point getMassCenter(Mat segmentos);
 
+//Array to keep track of presence of figures in camera image
+bool presentFigures[4];
 
+enum knownFigures { BB8, Lightsaber, R2D2, Spaceship };
 
 RNG rng(12345);
 ofstream myfile;
@@ -174,7 +178,7 @@ int main(int argc, char *argv[])
           }
           if(!(getWindowProperty("bullsEye", WND_PROP_AUTOSIZE) == -1))
           {
-            drawBullsEye(activeQuadrant, currentAngle);
+            drawBullsEye();
           }
         }
         else
@@ -237,7 +241,7 @@ int main(int argc, char *argv[])
               }
               else
               {
-                drawBullsEye(activeQuadrant, currentAngle);
+                drawBullsEye();
               }
               bullsEyeOn = !bullsEyeOn;
               break;
@@ -520,8 +524,33 @@ void hsvHistogram(){
 /* --------------------------------------------------------------------------------------*
  * ----   Function to draw BullsEye with active quadrant and angle line   ----      	   *
  * ------------------------------------------------------------------------------------- */
-void drawBullsEye(int cuadrante, int angle)
+void drawBullsEye()
 {
+  int cuadrante = 0;
+  //Assign global variable for current angle
+  int angle = currentAngle;
+  //Get corresponding quadrant from present figures
+  if (presentFigures[Lightsaber])
+  {
+    if(presentFigures[BB8])
+    {
+      cuadrante = 1;
+    }
+    else if(presentFigures[R2D2])
+    {
+      cuadrante = 2;
+    }
+  }else if(presentFigures[Spaceship])
+  {
+    if(presentFigures[BB8])
+    {
+      cuadrante = 4;
+    }
+    else if(presentFigures[R2D2])
+    {
+      cuadrante = 3;
+    }
+  }
   double pi = 3.1415926535897;
   int height=500, width=500;
   int cRadius=200;
@@ -604,7 +633,7 @@ Mat getContours(Mat regiones)
     //if a> largest_area
     if(a>300)
     {
-      Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+      Scalar color = Scalar(255,255,255); //White
       drawContours( contoursMat, contours, (int)i, color, 2, 8, hierarchy, 0, Point() );
     }
   }
@@ -666,227 +695,186 @@ void gotaDeAceite(Point seed, Mat outColored, Mat inputMat){
   {
     segSeedAux.push_back(center);
   }
-  find_moments(hsv_thres, myfile);
+  find_moments(segmentToMomento, myfile);
 }
 
 
 /* --------------------------------------------------------------------------------------*
- * Funcion para encontrar Hu Moments 									 	             *
- * -------------------------------------------------------------------------------------- */
-void find_moments(Mat bin, ofstream &myfile)
+ * Function to calculate Hu Moments 									 	                                 *
+ * ------------------------------------------------------------------------------------- */
+void find_moments(Mat segmentMoment, ofstream &myfile)
 {
-	Mat canny_output;
-	vector<vector<Point> > contours;
-	vector<Vec4i> hierarchy;
-
-	// Detect edges using canny
-	Canny(bin, canny_output, 50, 150, 3 );
-
-	// Find contours
-	findContours(canny_output, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) ); //CV_RETR_TREE
-
-	int largest_area = 0;
-	int largest_contour_index = 0;
-
-	for( int i = 0; i< contours.size(); i++ )
-  {
-    //Find the area of contour
-    double a=contourArea( contours[i],false);
-    //if a> largest_area
-    if(a>largest_area)
-    {
-      //Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
-      //drawContours( drawing, contours, (int)i, color, 2, 8, hierarchy, 0, Point() );
-
-      largest_area=a;
-      // Store the index of largest contour
-      largest_contour_index=i;
-    }
-  }
-
-	vector<Moments> mu(contours.size());                      // Moments
-	double huMoments[contours.size()][3];	                  // Hu Moments
-	double nMoments[contours.size()][3];					  // N Moments
+	Moments mu;                      // Moments
+	double huMoments[3];	                  // Hu Moments
+	double nMoments[3];					  // N Moments
 	double gamma[3];
 	gamma[0] = ((2+0)/2) + 1; 								  // Gamma 20
 	gamma[1] = ((0+2)/2) + 1; 								  // Gamma 02
 	gamma[2] = ((1+1)/2) + 1; 								  // Gamma 11
-	double fi[contours.size()][2];							  // Fi Values
-	vector<Point2f> centroid( contours.size() ); 			  // Centroids
-	Mat drawing = Mat::zeros( canny_output.size(), CV_8UC3 ); // Draw contours
-	Mat plano = Mat::zeros( canny_output.size(), CV_8UC3 );
+	double fi[2];							  // Fi Values
+	Point2f centroid; 			  // Centroids
+
 	double angle_rad, angle_g;								  // Orientation with Hu moments
-	double angles_g[contours.size()];
-	double angles_rad[contours.size()];
-	// Draw line (orientation)
-	Scalar color_line = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
-	Scalar color_point = Scalar( rng.uniform(255, 255), rng.uniform(255,255), rng.uniform(255,255) );
+
 	Point2f P2, P1;
-	// Calculate the area with the moments 00 and compare with the result of the OpenCV function
-	double area[contours.size()];
-	double length[contours.size()];
-	int fig = 0;
 
-	for( int i = 0; i< contours.size(); i++ )
+
+  // Get Moments
+  mu = moments(segmentMoment, false);
+
+  // Get Hu Moments
+  huMoments[0] = mu.m20 - ((mu.m10/mu.m00)*mu.m10); //Mu20
+  huMoments[1] = mu.m02 - ((mu.m01/mu.m00)*mu.m01); //Mu02
+  huMoments[2] = mu.m11 - ((mu.m01/mu.m00)*mu.m10); //Mu11
+  huMoments[3] = mu.m00;                            //Mu00
+
+  // Get N Moments
+  nMoments[0] = huMoments[0] / (pow(mu.m00, gamma[0])); //n20
+  nMoments[1] = huMoments[1] / (pow(mu.m00, gamma[1])); //n02
+  nMoments[2] = huMoments[2] / (pow(mu.m00, gamma[2])); //n11
+
+  // Get Fi values
+  fi[0] = nMoments[0] + nMoments[1]; //Fi1
+  fi[1] = pow((nMoments[0] - nMoments[1]), 2) + 4*pow(nMoments[2], 2); //Fi2
+
+  // Orientation
+  angle_rad = 0.5*atan2( (2*huMoments[2])  , (huMoments[0]- huMoments[1]) );
+  angle_g = angle_rad * (180.00/3.1416);
+
+
+  cout << "angulo rad: " << angle_rad << endl;
+  cout << "angulo grado: " << angle_g << endl;
+
+  printf("Fi1: %f \n", fi[0]);
+  printf("Fi2: %f \n", fi[1]);
+
+  myfile << fi[0] << "," << fi[1] << endl;
+
+
+  // ***************************   TRAINING DATA *********************************
+  double fi1_bb8 = 0.179271142;
+  double fi2_bb8 = 0.004877734;
+  double desv1_bb8 = 0.011026558;
+  double desv2_bb8 = 0.005050658;
+
+  double ddbb8 = pow((fi[0] - fi1_bb8),2) + pow((fi[1]-fi2_bb8),2);
+
+  double fi1_ea = 0.48499072;
+  double fi2_ea = 0.19502295;
+  double desv1_ea = 0.01722625;
+  double desv2_ea = 0.01254551;
+
+  double ddea = pow((fi[0] - fi1_ea),2) + pow((fi[1]-fi2_ea),2);
+
+  double fi1_r2 = 0.197311215;
+  double fi2_r2 = 0.013102077;
+  double desv1_r2 = 0.002949608;
+  double desv2_r2 = 0.001129111;
+
+  double ddr2 = pow((fi[0] - fi1_r2),2) + pow((fi[1]-fi2_r2),2);
+
+  double fi1_nave = 0.318991118;
+  double fi2_nave = 0.073201688;
+  double desv1_nave = 0.01409311;
+  double desv2_nave = 0.008670059;
+
+  double ddnave = pow((fi[0] - fi1_nave),2) + pow((fi[1]-fi2_nave),2);
+
+  // **********************   END OF TRAINING DATA *******************************
+
+  double dmin = min(ddea,ddbb8);
+  dmin = min(dmin, ddr2);
+  dmin = min(dmin, ddnave);
+
+  //Reset angle and figure presence for bullsEye drawing
+  currentAngle = 0;
+  presentFigures[BB8] = false;
+  presentFigures[Lightsaber] = false;
+  presentFigures[R2D2] = false;
+  presentFigures[Spaceship] = false;
+
+  if (dmin == ddbb8)
   {
-    double o=contourArea( contours[largest_contour_index],false);
-    double e=contourArea( contours[i],false);
-    if(  e > (o-30) )
+    if  ( ( ( fi1_bb8- desv1_bb8 ) < fi[0] ) &&  ( fi[0]  < (fi1_bb8 + desv1_bb8 )  )  )
     {
-    // Get Moments
-    mu[i] = moments(contours[i], false);
-
-    // Get Hu Moments
-    huMoments[i][0] = mu[i].m20 - ((mu[i].m10/mu[i].m00)*mu[i].m10); //Mu20
-    huMoments[i][1] = mu[i].m02 - ((mu[i].m01/mu[i].m00)*mu[i].m01); //Mu02
-    huMoments[i][2] = mu[i].m11 - ((mu[i].m01/mu[i].m00)*mu[i].m10); //Mu11
-    huMoments[i][3] = mu[i].m00;                                     //Mu00
-
-    // Get N Moments
-    nMoments[i][0] = huMoments[i][0] / (pow(mu[i].m00, gamma[0])); //n20
-    nMoments[i][1] = huMoments[i][1] / (pow(mu[i].m00, gamma[1])); //n02
-    nMoments[i][2] = huMoments[i][2] / (pow(mu[i].m00, gamma[2])); //n11
-
-    // Get Fi values
-    fi[i][0] = nMoments[i][0] + nMoments[i][1]; //Fi1
-    fi[i][1] = pow((nMoments[i][0] - nMoments[i][1]), 2) + 4*pow(nMoments[i][2], 2); //Fi2
-
-    // Get centroids
-    centroid[i] = Point2f(mu[i].m10/mu[i].m00 , mu[i].m01/mu[i].m00 );
-
-    // Draw contours
-    Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255));
-    drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point());
-    circle(drawing, centroid[i], 4, color, -1, 8, 0);
-
-    // Orientation
-    //angle_rad = 0.5*atan((2*huMoments[i][2])/(huMoments[i][0]-huMoments[i][1]));
-    angle_rad = 0.5*atan2( (2*huMoments[i][2])  , (huMoments[i][0]- huMoments[i][1]) );
-    angle_g = angle_rad * (180.00/3.1416);
-    angles_g[i] = angle_g;
-    angles_rad[i] = angle_rad;
-
-
-    cout << "angulo rad: " << angles_rad[i] << endl;
-    cout << "angulo grado: " << angles_g[i] << endl;
-
-    currentAngle = angles_g[i];
-
-
-    // Draw line (orientation) //TODO: Complete line
-    P1 = centroid[i];
-    double l = 100;
-    P2.x = P1.x + l * sin(angles_rad[i]);
-    P2.y = P1.y - l * cos(angles_rad[i]);
-    line(drawing, P1, P2, color_line, 5, 8, 0);
-
-    P2.x = P1.x - l * sin(angles_rad[i]);
-    P2.y = P1.y + l * cos(angles_rad[i]);
-    line(drawing, P1, P2, color_line, 5, 8, 0);
-
-    // Show in a window
-    namedWindow("6. Moments Image", CV_WINDOW_AUTOSIZE);
-    imshow("6. Moments Image", drawing );
-    moveWindow("6. Moments Image", 1000, 400);
-
-    area[i] = mu[i].m00;
-    length[i] = arcLength(contours[i], true);
-
-    if (area[i] > 400)
-    {
-      printf("Fi1: %f \n", fi[i][0]);
-      printf("Fi2: %f \n", fi[i][1]);
-
-      double fi1 = fi[i][0];
-      double fi2 = fi[i][1];
-
-      myfile << fi[i][0] << "," << fi[i][1] << endl;
-
-      double fi1_bb8 = 0.179271142;
-      double fi2_bb8 = 0.004877734;
-      double desv1_bb8 = 0.011026558;
-      double desv2_bb8 = 0.005050658;
-
-      double ddbb8 = pow((fi1 - fi1_bb8),2) + pow((fi2-fi2_bb8),2);
-
-      double fi1_ea = 0.48499072;
-      double fi2_ea = 0.19502295;
-      double desv1_ea = 0.01722625;
-      double desv2_ea = 0.01254551;
-
-      double ddea = pow((fi1 - fi1_ea),2) + pow((fi2-fi2_ea),2);
-
-      double fi1_r2 = 0.197311215;
-      double fi2_r2 = 0.013102077;
-      double desv1_r2 = 0.002949608;
-      double desv2_r2 = 0.001129111;
-
-      double ddr2 = pow((fi1 - fi1_r2),2) + pow((fi2-fi2_r2),2);
-
-      double dmin = min(ddea,ddbb8);
-      dmin = min(dmin, ddr2);
-      bool flagzaso = false;
-
-      if (dmin == ddbb8)
+      if ( ( (fi2_bb8 - desv2_bb8) < fi[1] ) && (fi[1]  < (fi2_bb8 + desv2_bb8 ) ) )
       {
-        //if  ( ( ( fi1_bb8- .3 ) < fi1 ) &&  ( fi1  < (fi1_bb8 + .3 )  )  ) {
-        if  ( ( ( fi1_bb8- desv1_bb8 ) < fi1 ) &&  ( fi1  < (fi1_bb8 + desv1_bb8 )  )  )
-        {
-          if ( ( (fi2_bb8 - desv2_bb8) < fi2 ) && (fi2  < (fi2_bb8 + desv2_bb8 ) ) )
-          {
-            cout << "bb8" << endl;
-            flagzaso = true;
-          }
-        }
+        cout << "bb8" << endl;
+        presentFigures[BB8] = true; // BB8 present on screen
       }
-      else if (dmin == ddea)
-      {
-        if (( (fi1_ea- 5*desv1_ea) < fi1) &&     (fi1< (fi1_ea + 5*desv1_ea) ) )
-        {
-          if (( (fi2_ea- 5*desv2_ea) < fi2) &&  (fi2< (fi2_ea + 5*desv2_ea) ) )
-          {
-            cout << "espadux" << endl;
-            flagzaso = true;
-          }
-        }
-      }
-      else if (dmin == ddr2)
-      {
-        if (( (fi1_r2- 5*desv1_r2) < fi1) && (fi1< (fi1_r2 + 5*desv1_r2) ) )
-        {
-          if (( (fi2_r2- 5*desv2_r2) < fi2) && (fi2< (fi2_r2 + 5*desv2_r2) ) )
-            {
-              cout << "r2" << endl;
-              flagzaso = true;
-            }
-        }
-      }
-
-      if (!flagzaso)
-      {
-        cout <<"nada ft. el chido" <<endl;
-      }
-
-      // Draw Fi values 320x240
-      Point xi, xf, yi, yf, textf1, textf2;
-      xi.x = 0; xi.y = 0;
-      xf.x = 320; xf.y = 0;
-      yi.x = 0; yi.y = 0;
-      yf.x = 0; yf.y = 240;
-      textf1.x = 280; textf1.y = 35;
-      textf2.x = 10; textf2.y = 235;
-      line(plano, xi, xf, color_line, 10, 8, 0);
-      line(plano, yi, yf, color_line, 10, 8, 0);
-      putText(plano, "Fi1", textf1, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 8, 0);
-      putText(plano, "Fi2", textf2, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 8, 0);
-      // Plotear fi values
-      Point P_fi;
-      P_fi.x = (fi[i][0] * 320); //Fi1
-      P_fi.y = (fi[i][1] * 240); //Fi2
-      circle(plano, P_fi, 0, color_point, 15, 8, 0);
-    }
-    namedWindow("Plano", CV_WINDOW_AUTOSIZE);
-    imshow("Plano", plano);
     }
   }
+  else if (dmin == ddea)
+  {
+    if (( (fi1_ea- 5*desv1_ea) < fi[0]) &&     (fi[0]< (fi1_ea + 5*desv1_ea) ) )
+    {
+      if (( (fi2_ea- 5*desv2_ea) < fi[1]) &&  (fi[1]< (fi2_ea + 5*desv2_ea) ) )
+      {
+        cout << "espadux" << endl;
+        // Update angle for bullsEye drawing
+        currentAngle = angle_g;
+        presentFigures[Lightsaber] = true; // Lightsaber present on screen
+      }
+    }
+  }
+  else if (dmin == ddr2)
+  {
+    if (( (fi1_r2- 5*desv1_r2) < fi[0]) && (fi[0]< (fi1_r2 + 5*desv1_r2) ) )
+    {
+      if (( (fi2_r2- 5*desv2_r2) < fi[1]) && (fi[1]< (fi2_r2 + 5*desv2_r2) ) )
+        {
+          cout << "r2" << endl;
+          presentFigures[R2D2] = true; // R2D2 present on screen
+        }
+    }
+  }
+  else if (dmin == ddnave)
+  {
+    if (( (fi1_nave- 5*desv1_nave) < fi[0]) && (fi[0]< (fi1_nave + 5*desv1_nave) ) )
+    {
+      if (( (fi2_nave- 5*desv2_nave) < fi[1]) && (fi[1]< (fi2_nave + 5*desv2_nave) ) )
+        {
+          cout << "nave" << endl;
+          // Update angle for bullsEye drawing
+          currentAngle = angle_g;
+          presentFigures[Spaceship] = true; // Spaceship present on screen
+        }
+    }
+  }
+  else
+  {
+    cout <<"No se encuentra ninguna figura" <<endl;
+  }
+  plotF1F2(fi);
+}
+
+
+/* --------------------------------------------------------------------------------------*
+ * Function to plot F1 and F2 from Hu moments analisis 									 	               *
+ * ------------------------------------------------------------------------------------- */
+void plotF1F2(double fi[2])
+{
+  Scalar color_point = Scalar(51, 255, 255); // Yellow
+  Scalar color_line = Scalar(47, 255, 173); // Green
+  Mat plano = Mat::zeros( hsv_thres.size(), CV_8UC3 );
+  // Draw Fi values 320x240
+  Point xi, xf, yi, yf, textf1, textf2;
+  xi.x = 0; xi.y = 0;
+  xf.x = 320; xf.y = 0;
+  yi.x = 0; yi.y = 0;
+  yf.x = 0; yf.y = 240;
+  textf1.x = 280; textf1.y = 35;
+  textf2.x = 10; textf2.y = 235;
+  line(plano, xi, xf, color_line, 10, 8, 0);
+  line(plano, yi, yf, color_line, 10, 8, 0);
+  putText(plano, "Fi1", textf1, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 8, 0);
+  putText(plano, "Fi2", textf2, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 8, 0);
+  // Plotear fi values
+  Point P_fi;
+  P_fi.x = (fi[0] * 320); //Fi1
+  P_fi.y = (fi[1] * 240); //Fi2
+  circle(plano, P_fi, 0, color_point, 15, 8, 0);
+
+  namedWindow("Plano", CV_WINDOW_AUTOSIZE);
+  imshow("Plano", plano);
 }
