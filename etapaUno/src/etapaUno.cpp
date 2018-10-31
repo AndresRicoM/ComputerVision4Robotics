@@ -100,12 +100,35 @@ void updateSegContCen();
 void gotaDeAceite(Point seed, Mat outColored, Mat inputMat);
 void find_moments(Mat segmentMoment, ofstream &myfile);
 void plotF1F2(double fi[2]);
+void updateTrainingMoment(Mat segmentToMomento);
+void calculateTrainedPhi();
 Mat segmentar(Mat binaria);
 Mat getContours(Mat regiones);
 Point getMassCenter(Mat segmentos);
 
 //Array to keep track of presence of figures in camera image
 bool presentFigures[4];
+
+struct myPiStruct
+{
+  double phiG1;
+  double phiG2;
+};
+
+struct trainedDataStruct
+{
+  double fi1;
+  double fi2;
+  double desv1;
+  double desv2;
+};
+
+trainedDataStruct trainedData[4];
+
+bool trainingActive = false;
+vector<myPiStruct> fiTrainingVector;
+int trainingId = 4;
+myPiStruct fiTrainingPair;
 
 enum knownFigures { BB8, Lightsaber, R2D2, Spaceship };
 
@@ -117,6 +140,31 @@ ofstream myfile;
  * ------------------------------------------------------------------------------------- */
 int main(int argc, char *argv[])
 {
+  // ***************************   TRAINING DATA *********************************
+  trainedData[0].fi1 = 0.179271142;
+  trainedData[0].fi2 = 0.004877734;
+  trainedData[0].desv1 = 0.011026558;
+  trainedData[0].desv2 = 0.005050658;
+
+
+  trainedData[1].fi1 = 0.48499072;
+  trainedData[1].fi2 = 0.19502295;
+  trainedData[1].desv1 = 0.01722625;
+  trainedData[1].desv2 = 0.01254551;
+
+  trainedData[2].fi1 = 0.197311215;
+  trainedData[2].fi2 = 0.013102077;
+  trainedData[2].desv1 = 0.002949608;
+  trainedData[2].desv2 = 0.001129111;
+
+
+  trainedData[3].fi1 = 0.318991118;
+  trainedData[3].fi2 = 0.073201688;
+  trainedData[3].desv1 = 0.01409311;
+  trainedData[3].desv2 = 0.008670059;
+
+  // ***************************   TRAINING DATA *********************************
+
   bool histogramOn = false;
   bool bullsEyeOn = false;
 	/* First, open camera device */
@@ -244,6 +292,38 @@ int main(int argc, char *argv[])
                 drawBullsEye();
               }
               bullsEyeOn = !bullsEyeOn;
+              break;
+          case 't':
+              // Toggle training functionality
+              trainingActive = !trainingActive;
+              if(trainingActive)
+              {
+                trainingId = -1;
+                if(segSeeds.size()!=1){
+                  cout<< "Error: solo debe haber una semilla en el entrenamiento" << endl;
+                  trainingActive = false;
+                }
+                cout << "Que figura desea entrenar? "<<endl;
+                cout << "  [0] BB8"<<endl;
+                cout << "  [1] Lightsaber "<<endl;
+                cout << "  [2] R2D2 "<<endl;
+                cout << "  [3] Spaceship "<<endl;
+                cin >> trainingId;
+              }
+              else
+              {
+                cout << "TrainingId: " << trainingId << endl;
+                calculateTrainedPhi();
+                // Clear phi training vector
+                fiTrainingVector.clear();
+              }
+              break;
+          case 'p':
+              // Push training moment to currently trained figure
+              if(trainingActive){
+                fiTrainingVector.push_back(fiTrainingPair);
+                cout<< "MOMENT PUSHED FOR TRAINING" <<endl;
+              }
               break;
   				case 'x':
   					/* If 'x' is pressed, exit program */
@@ -582,7 +662,7 @@ void drawBullsEye()
   //Draw angle line
   int angleX = cRadius * cos((-angle*pi)/180);
   int angleY = cRadius * sin((-angle*pi)/180);
-  line(eye, Point(width/2+angleX, height/2+angleY), Point(width/2-angleX, height/2-angleY), Scalar( 255, 0, 0), 1, 8, 0);
+  line(eye, Point(width/2+angleX, height/2+angleY), Point(width/2-angleX, height/2-angleY), Scalar( 255, 0, 0), 3, 8, 0);
 
   imshow("bullsEye", eye);
   moveWindow("bullsEye", 0, 600);
@@ -695,15 +775,58 @@ void gotaDeAceite(Point seed, Mat outColored, Mat inputMat){
   {
     segSeedAux.push_back(center);
   }
-  find_moments(segmentToMomento, myfile);
+  //normal operation
+  if(!trainingActive)
+  {
+    find_moments(segmentToMomento, myfile);
+  }
+  else
+  {
+    updateTrainingMoment(segmentToMomento);
+  }
 }
 
-
+int cuentame = 0;
 /* --------------------------------------------------------------------------------------*
  * Function to calculate Hu Moments 									 	                                 *
  * ------------------------------------------------------------------------------------- */
 void find_moments(Mat segmentMoment, ofstream &myfile)
 {
+		Mat canny_output;
+    Mat drawing = Mat::zeros( hsv_thres.size(), CV_8UC3 ); // Draw contours
+	vector<vector<Point> > contours;
+	vector<Vec4i> hierarchy;
+
+	// Detect edges using canny
+	//Canny(bin, canny_output, 50, 150, 3 );
+  Canny(segmentMoment, canny_output, 50, 150, 3 );
+
+
+	// Find contours
+	findContours(canny_output, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) ); //CV_RETR_TREE
+
+	int largest_area = 0;
+	int largest_contour_index = 0;
+
+	if (contours.size() > 0){
+
+	for( int i = 0; i< (int)contours.size(); i++ )
+  {
+    //Find the area of contour
+    double a=contourArea( contours[i],false);
+    //if a> largest_area
+    if(a>largest_area)
+    {
+      //Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+      //drawContours( drawing, contours, (int)i, color, 2, 8, hierarchy, 0, Point() );
+
+      largest_area=a;
+      // Store the index of largest contour
+      largest_contour_index=i;
+    }
+  }
+
+
 	Moments mu;                      // Moments
 	double huMoments[3];	                  // Hu Moments
 	double nMoments[3];					  // N Moments
@@ -720,8 +843,7 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
 
 
   // Get Moments
-  mu = moments(segmentMoment, false);
-
+  mu = moments(contours[largest_contour_index], false);
   // Get Hu Moments
   huMoments[0] = mu.m20 - ((mu.m10/mu.m00)*mu.m10); //Mu20
   huMoments[1] = mu.m02 - ((mu.m01/mu.m00)*mu.m01); //Mu02
@@ -737,67 +859,69 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   fi[0] = nMoments[0] + nMoments[1]; //Fi1
   fi[1] = pow((nMoments[0] - nMoments[1]), 2) + 4*pow(nMoments[2], 2); //Fi2
 
+  centroid = Point2f(mu.m10/huMoments[3] , mu.m01/huMoments[3] );
+
+  drawContours(drawing, contours, 0, colors[0], 2, 8, hierarchy, 0, Point());
+  circle(drawing, centroid, 4, colors[1], -1, 8, 0);
+
   // Orientation
   angle_rad = 0.5*atan2( (2*huMoments[2])  , (huMoments[0]- huMoments[1]) );
   angle_g = angle_rad * (180.00/3.1416);
 
+  // Draw line (orientation) //TODO: Complete line
+  P1 = centroid;
+  double l = 250;
+  P2.x = P1.x + l * sin(angle_rad+3.1416/2);
+  P2.y = P1.y - l * cos(angle_rad+3.1416/2);
+  line(drawing, P1, P2, colors[2], 1, 8, 0);
 
-  cout << "angulo rad: " << angle_rad << endl;
-  cout << "angulo grado: " << angle_g << endl;
+  P2.x = P1.x - l * sin(angle_rad+3.1416/2);
+  P2.y = P1.y + l * cos(angle_rad+3.1416/2);
+  line(drawing, P1, P2, colors[2], 1, 8, 0);
+
+  // Show in a window
+  imshow("Moments Image", drawing );
+  moveWindow("Moments Image", 1000, 400);
+
+
+  //cout << "angulo rad: " << angle_rad << endl;
+  //cout << "angulo grado: " << angle_g << endl;
 
   printf("Fi1: %f \n", fi[0]);
   printf("Fi2: %f \n", fi[1]);
 
-  myfile << fi[0] << "," << fi[1] << endl;
+  //myfile << fi[0] << "," << fi[1] << endl;
 
 
-  // ***************************   TRAINING DATA *********************************
-  double fi1_bb8 = 0.179271142;
-  double fi2_bb8 = 0.004877734;
-  double desv1_bb8 = 0.011026558;
-  double desv2_bb8 = 0.005050658;
+  // ***************************   Calc distance in Phis to figure *********************************
 
-  double ddbb8 = pow((fi[0] - fi1_bb8),2) + pow((fi[1]-fi2_bb8),2);
-
-  double fi1_ea = 0.48499072;
-  double fi2_ea = 0.19502295;
-  double desv1_ea = 0.01722625;
-  double desv2_ea = 0.01254551;
-
-  double ddea = pow((fi[0] - fi1_ea),2) + pow((fi[1]-fi2_ea),2);
-
-  double fi1_r2 = 0.197311215;
-  double fi2_r2 = 0.013102077;
-  double desv1_r2 = 0.002949608;
-  double desv2_r2 = 0.001129111;
-
-  double ddr2 = pow((fi[0] - fi1_r2),2) + pow((fi[1]-fi2_r2),2);
-
-  double fi1_nave = 0.318991118;
-  double fi2_nave = 0.073201688;
-  double desv1_nave = 0.01409311;
-  double desv2_nave = 0.008670059;
-
-  double ddnave = pow((fi[0] - fi1_nave),2) + pow((fi[1]-fi2_nave),2);
-
-  // **********************   END OF TRAINING DATA *******************************
+  double ddbb8 = pow((fi[0] - trainedData[0].fi1),2) + pow((fi[1]-trainedData[0].fi2),2);
+  double ddea = pow((fi[0] - trainedData[1].fi1),2) + pow((fi[1]-trainedData[1].fi2),2);
+  double ddr2 = pow((fi[0] - trainedData[2].fi1),2) + pow((fi[1]-trainedData[2].fi2),2);
+  double ddnave = pow((fi[0] - trainedData[3].fi1),2) + pow((fi[1]-trainedData[3].fi2),2);
 
   double dmin = min(ddea,ddbb8);
   dmin = min(dmin, ddr2);
   dmin = min(dmin, ddnave);
 
+
+
   //Reset angle and figure presence for bullsEye drawing
   currentAngle = 0;
+  if (cuentame>1){
   presentFigures[BB8] = false;
   presentFigures[Lightsaber] = false;
   presentFigures[R2D2] = false;
   presentFigures[Spaceship] = false;
+  cuentame=0;
+}
+cuentame+=1;
 
   if (dmin == ddbb8)
   {
-    if  ( ( ( fi1_bb8- desv1_bb8 ) < fi[0] ) &&  ( fi[0]  < (fi1_bb8 + desv1_bb8 )  )  )
+    if  ( ( ( trainedData[0].fi1- trainedData[0].desv1 ) < fi[0] ) &&  ( fi[0]  < (trainedData[0].fi1 + trainedData[0].desv1 )  )  )
     {
-      if ( ( (fi2_bb8 - desv2_bb8) < fi[1] ) && (fi[1]  < (fi2_bb8 + desv2_bb8 ) ) )
+      if ( ( (trainedData[0].fi2 - trainedData[0].desv2) < fi[1] ) && (fi[1]  < (trainedData[0].fi2 + trainedData[0].desv2 ) ) )
       {
         cout << "bb8" << endl;
         presentFigures[BB8] = true; // BB8 present on screen
@@ -806,9 +930,9 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   }
   else if (dmin == ddea)
   {
-    if (( (fi1_ea- 5*desv1_ea) < fi[0]) &&     (fi[0]< (fi1_ea + 5*desv1_ea) ) )
+    if (( (trainedData[1].fi1- 5*trainedData[1].desv1) < fi[0]) &&     (fi[0]< (trainedData[1].fi1 + 5*trainedData[1].desv1) ) )
     {
-      if (( (fi2_ea- 5*desv2_ea) < fi[1]) &&  (fi[1]< (fi2_ea + 5*desv2_ea) ) )
+      if (( (trainedData[1].fi2- 5*trainedData[1].desv2) < fi[1]) &&  (fi[1]< (trainedData[1].fi2 + 5*trainedData[1].desv2) ) )
       {
         cout << "espadux" << endl;
         // Update angle for bullsEye drawing
@@ -819,9 +943,9 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   }
   else if (dmin == ddr2)
   {
-    if (( (fi1_r2- 5*desv1_r2) < fi[0]) && (fi[0]< (fi1_r2 + 5*desv1_r2) ) )
+    if (( (trainedData[2].fi1- 5*trainedData[2].desv1) < fi[0]) && (fi[0]< (trainedData[2].fi1 + 5*trainedData[2].desv1) ) )
     {
-      if (( (fi2_r2- 5*desv2_r2) < fi[1]) && (fi[1]< (fi2_r2 + 5*desv2_r2) ) )
+      if (( (trainedData[2].fi2- 5*trainedData[2].desv2) < fi[1]) && (fi[1]< (trainedData[2].fi2 + 5*trainedData[2].desv2) ) )
         {
           cout << "r2" << endl;
           presentFigures[R2D2] = true; // R2D2 present on screen
@@ -830,9 +954,9 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   }
   else if (dmin == ddnave)
   {
-    if (( (fi1_nave- 5*desv1_nave) < fi[0]) && (fi[0]< (fi1_nave + 5*desv1_nave) ) )
+    if (( (trainedData[3].fi1- 5*trainedData[3].desv1) < fi[0]) && (fi[0]< (trainedData[3].fi1 + 5*trainedData[3].desv1) ) )
     {
-      if (( (fi2_nave- 5*desv2_nave) < fi[1]) && (fi[1]< (fi2_nave + 5*desv2_nave) ) )
+      if (( (trainedData[3].fi2- 5*trainedData[3].desv2) < fi[1]) && (fi[1]< (trainedData[3].fi2 + 5*trainedData[3].desv2) ) )
         {
           cout << "nave" << endl;
           // Update angle for bullsEye drawing
@@ -848,7 +972,7 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   plotF1F2(fi);
 }
 
-
+}
 /* --------------------------------------------------------------------------------------*
  * Function to plot F1 and F2 from Hu moments analisis 									 	               *
  * ------------------------------------------------------------------------------------- */
@@ -857,24 +981,152 @@ void plotF1F2(double fi[2])
   Scalar color_point = Scalar(51, 255, 255); // Yellow
   Scalar color_line = Scalar(47, 255, 173); // Green
   Mat plano = Mat::zeros( hsv_thres.size(), CV_8UC3 );
+
   // Draw Fi values 320x240
   Point xi, xf, yi, yf, textf1, textf2;
-  xi.x = 0; xi.y = 0;
-  xf.x = 320; xf.y = 0;
+  xi.x = 0; xi.y = hsv_thres.rows;
+  xf.x = hsv_thres.cols; xf.y = hsv_thres.rows;
   yi.x = 0; yi.y = 0;
-  yf.x = 0; yf.y = 240;
-  textf1.x = 280; textf1.y = 35;
-  textf2.x = 10; textf2.y = 235;
-  line(plano, xi, xf, color_line, 10, 8, 0);
-  line(plano, yi, yf, color_line, 10, 8, 0);
-  putText(plano, "Fi1", textf1, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 8, 0);
-  putText(plano, "Fi2", textf2, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 8, 0);
+  yf.x = 0; yf.y = hsv_thres.rows;
+
+  textf1.x = hsv_thres.cols - 45; textf1.y = hsv_thres.rows - 10;
+  textf2.x = 10; textf2.y = 30;
+
+  line(plano, xi, xf, color_line, 2, 8, 0);
+  line(plano, yi, yf, color_line, 2, 8, 0);
+
+  putText(plano, "Fi1", textf1, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 2, 0);
+  putText(plano, "Fi2", textf2, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 2, 0);
   // Plotear fi values
   Point P_fi;
-  P_fi.x = (fi[0] * 320); //Fi1
-  P_fi.y = (fi[1] * 240); //Fi2
-  circle(plano, P_fi, 0, color_point, 15, 8, 0);
+  P_fi.x = (fi[0] * hsv_thres.cols); //Fi1
+  P_fi.y = (fi[1] * hsv_thres.rows); //Fi2
+  circle(plano, Point(P_fi.x, hsv_thres.rows - P_fi.y), 0, color_point, 5, 8, 0);
+
+  //Paint stored figures caracterization
+
+  //trainedData[trainingId].fi2 = mean;
+  //trainedData[trainingId].desv2 = standardDeviation;
+
+  for(int i = 0; i<4 ; i++){
+    //rectangle(plano, Point((trainedData[i].fi2 - trainedData[i].desv2)* hsv_thres.cols, (trainedData[i].fi1 + trainedData[i].desv1)* hsv_thres.rows), Point((trainedData[i].fi2 + trainedData[i].desv2)* hsv_thres.cols, (trainedData[i].fi1 - trainedData[i].desv1)* hsv_thres.rows), colors[i], 2, 8, 0);
+    rectangle(plano, Point((trainedData[i].fi1 + trainedData[i].desv1)* hsv_thres.cols, hsv_thres.rows - (trainedData[i].fi2 - trainedData[i].desv2)* hsv_thres.rows), Point((trainedData[i].fi1 - trainedData[i].desv1)* hsv_thres.cols, hsv_thres.rows - (trainedData[i].fi2 + trainedData[i].desv2)* hsv_thres.rows), colors[i], 2, 8, 0);
+  }
+
+  putText(plano, "BB8", Point(trainedData[0].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[0].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
+  putText(plano, "Light", Point(trainedData[1].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[1].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
+  putText(plano, "R2D2", Point(trainedData[2].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[2].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
+  putText(plano, "Spaceship", Point(trainedData[3].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[3].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
 
   namedWindow("Plano", CV_WINDOW_AUTOSIZE);
   imshow("Plano", plano);
+}
+
+/* --------------------------------------------------------------------------------------*
+ * Function to calculate one Hu Moments 									 	                                 *
+ * ------------------------------------------------------------------------------------- */
+void updateTrainingMoment(Mat segmentMoment)
+{
+	Mat canny_output;
+	vector<vector<Point> > contours;
+	vector<Vec4i> hierarchy;
+
+	// Detect edges using canny
+	//Canny(bin, canny_output, 50, 150, 3 );
+  Canny(segmentMoment, canny_output, 50, 150, 3 );
+
+
+	// Find contours
+	findContours(canny_output, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) ); //CV_RETR_TREE
+
+	int largest_area = 0;
+	int largest_contour_index = 0;
+
+	if (contours.size() > 0)
+  {
+
+  	for( int i = 0; i< (int)contours.size(); i++ )
+    {
+      //Find the area of contour
+      double a=contourArea( contours[i],false);
+      //if a> largest_area
+      if(a>largest_area)
+      {
+        //Scalar color = Scalar( rng.uniform(0, 255), rng.uniform(0,255), rng.uniform(0,255) );
+        //drawContours( drawing, contours, (int)i, color, 2, 8, hierarchy, 0, Point() );
+
+        largest_area=a;
+        // Store the index of largest contour
+        largest_contour_index=i;
+      }
+    }
+
+
+  	Moments mu;                      // Moments
+  	double huMoments[3];	                  // Hu Moments
+  	double nMoments[3];					  // N Moments
+  	double gamma[3];
+  	gamma[0] = ((2+0)/2) + 1; 								  // Gamma 20
+  	gamma[1] = ((0+2)/2) + 1; 								  // Gamma 02
+  	gamma[2] = ((1+1)/2) + 1; 								  // Gamma 11
+
+    // Get Moments
+    mu = moments(contours[largest_contour_index], false);
+    // Get Hu Moments
+    huMoments[0] = mu.m20 - ((mu.m10/mu.m00)*mu.m10); //Mu20
+    huMoments[1] = mu.m02 - ((mu.m01/mu.m00)*mu.m01); //Mu02
+    huMoments[2] = mu.m11 - ((mu.m01/mu.m00)*mu.m10); //Mu11
+    huMoments[3] = mu.m00;                            //Mu00
+
+    // Get N Moments
+    nMoments[0] = huMoments[0] / (pow(mu.m00, gamma[0])); //n20
+    nMoments[1] = huMoments[1] / (pow(mu.m00, gamma[1])); //n02
+    nMoments[2] = huMoments[2] / (pow(mu.m00, gamma[2])); //n11
+
+    // Get Fi values
+    fiTrainingPair.phiG1 = nMoments[0] + nMoments[1]; //Fi1
+    fiTrainingPair.phiG2 = pow((nMoments[0] - nMoments[1]), 2) + 4*pow(nMoments[2], 2); //Fi2
+  }
+}
+
+/* --------------------------------------------------------------------------------------*
+ * Function to update trainedData with phi vector									 	                                 *
+ * ------------------------------------------------------------------------------------- */
+void calculateTrainedPhi()
+{
+    int sizeOfVector = fiTrainingVector.size();
+    double sum = 0.0, mean, standardDeviation = 0.0;
+
+    for(int i = 0; i < sizeOfVector; i++)
+    {
+        sum += fiTrainingVector.at(i).phiG1;
+    }
+
+    mean = sum/sizeOfVector;
+
+    for(int i = 0; i < sizeOfVector; i++)
+        standardDeviation += pow(fiTrainingVector.at(i).phiG1 - mean, 2);
+
+    standardDeviation = sqrt(standardDeviation / sizeOfVector);
+
+    trainedData[trainingId].fi1 = mean;
+    trainedData[trainingId].desv1 = standardDeviation;
+
+    sum = 0.0;
+    standardDeviation = 0.0;
+
+    for(int i = 0; i < sizeOfVector; i++)
+    {
+        sum += fiTrainingVector.at(i).phiG2;
+    }
+
+    mean = sum/sizeOfVector;
+
+    for(int i = 0; i < sizeOfVector; i++)
+        standardDeviation += pow(fiTrainingVector.at(i).phiG2 - mean, 2);
+
+    standardDeviation = sqrt(standardDeviation / sizeOfVector);
+
+    trainedData[trainingId].fi2 = mean;
+    trainedData[trainingId].desv2 = standardDeviation;
 }
