@@ -30,6 +30,15 @@
 using namespace cv;
 using namespace std;
 
+//Momentos
+  //**************Moments
+  long double m00;
+  long double m10;
+  long double m01;
+  long double m20;
+  long double m02;
+  long double m11;
+
 // Array to map segmentation id color
 Vec3i colors[5] ={
   Vec3i(255, 244, 30), // Light Blue
@@ -140,6 +149,7 @@ ofstream myfile;
  * ------------------------------------------------------------------------------------- */
 int main(int argc, char *argv[])
 {
+
   // ***************************   TRAINING DATA *********************************
   trainedData[0].fi1 = 0.179271142;
   trainedData[0].fi2 = 0.004877734;
@@ -747,12 +757,12 @@ void gotaDeAceite(Point seed, Mat outColored, Mat inputMat){
   Point vecinos[4] = {Point(0,1),Point(0,-1),Point(1,0),Point(-1,0)}; //Coordenadas vecinos
   Point Pa, Pe; // Punto adjacente, punto evaluado
   Fo.push_back(seed);
-  int m00 = 1;
-  int m10 = Pa.x;
-  int m01 = Pa.y;
-  int m20 = Pa.x * Pa.x;
-  int m02 = Pa.y * Pa.y;
-  int m11 = Pa.x * Pa.y;
+  m00 = 1;
+  m10 = Pa.x;
+  m01 = Pa.y;
+  m20 = Pa.x * Pa.x;
+  m02 = Pa.y * Pa.y;
+  m11 = Pa.x * Pa.y;
   while (!Fo.empty()){
     Pe = Fo.back();
     Fo.pop_back();
@@ -774,7 +784,7 @@ void gotaDeAceite(Point seed, Mat outColored, Mat inputMat){
           m01 += Pa.y;
           m20 += Pa.x * Pa.x;
           m02 += Pa.y * Pa.y;
-          m11 += Pa.x * Pa.y
+          m11 += Pa.x * Pa.y;
       }
       //
     }
@@ -856,21 +866,30 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   // Get Moments
   mu = moments(contours[largest_contour_index], false);
   // Get Hu Moments
-  huMoments[0] = mu.m20 - ((mu.m10/mu.m00)*mu.m10); //Mu20
-  huMoments[1] = mu.m02 - ((mu.m01/mu.m00)*mu.m01); //Mu02
-  huMoments[2] = mu.m11 - ((mu.m01/mu.m00)*mu.m10); //Mu11
-  huMoments[3] = mu.m00;                            //Mu00
+  huMoments[0] = m20 - ((m10/m00)*m10);
+  huMoments[1] = m02 - ((m01/m00)*m01);
+  huMoments[2] = m11 - ((m01/m00)*m10);
+  huMoments[3] = m00;
+
+  //huMoments[0] = mu.m20 - ((mu.m10/mu.m00)*mu.m10); //Mu20
+  //huMoments[1] = mu.m02 - ((mu.m01/mu.m00)*mu.m01); //Mu02
+  //huMoments[2] = mu.m11 - ((mu.m01/mu.m00)*mu.m10); //Mu11
+  //huMoments[3] = mu.m00;                            //Mu00
 
   // Get N Moments
-  nMoments[0] = huMoments[0] / (pow(mu.m00, gamma[0])); //n20
-  nMoments[1] = huMoments[1] / (pow(mu.m00, gamma[1])); //n02
-  nMoments[2] = huMoments[2] / (pow(mu.m00, gamma[2])); //n11
+  nMoments[0] = huMoments[0] / (pow(mu.m00, gamma[0]));
+  nMoments[1] = huMoments[1] / (pow(mu.m00, gamma[1]));
+  nMoments[2] = huMoments[2] / (pow(mu.m00, gamma[2]));
+  //nMoments[0] = huMoments[0] / (pow(mu.m00, gamma[0])); //n20
+  //nMoments[1] = huMoments[1] / (pow(mu.m00, gamma[1])); //n02
+  //nMoments[2] = huMoments[2] / (pow(mu.m00, gamma[2])); //n11
 
   // Get Fi values
   fi[0] = nMoments[0] + nMoments[1]; //Fi1
   fi[1] = pow((nMoments[0] - nMoments[1]), 2) + 4*pow(nMoments[2], 2); //Fi2
 
-  centroid = Point2f(mu.m10/huMoments[3] , mu.m01/huMoments[3] );
+  centroid = Point2f(m10/huMoments[3] , m01/huMoments[3] );
+  //centroid = Point2f(mu.m10/huMoments[3] , mu.m01/huMoments[3] );
 
   drawContours(drawing, contours, 0, colors[0], 2, 8, hierarchy, 0, Point());
   circle(drawing, centroid, 4, colors[1], -1, 8, 0);
