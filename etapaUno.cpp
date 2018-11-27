@@ -1425,12 +1425,14 @@ void mouseOnParkingImage(int event, int x, int y, int flags, void* param)
 return path;
 }
 
+
 void pintar_ruta(list path, Mat imagen){
   Point previo;
   while(!path.empty()){
     previo = path.pop_front();
     line(imagen,previo,path.front(), Vec3i(255, 244, 30) , 1) //Azul
   }
+  imshow("final",imagen);
 }
 
 
