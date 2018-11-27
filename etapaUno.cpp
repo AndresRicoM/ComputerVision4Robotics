@@ -1345,7 +1345,7 @@ void mouseOnParkingImage(int event, int x, int y, int flags, void* param)
   list create_NF1(Mat parkingOriginal, Point Pi,Point punto_partida ){
 
   //MAT auxiliar for harcoded Map
-  Mat inicial = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_16UC1);
+  Mat inicial = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_64F);
   Point matriz  = Point(parkingOriginal.rows,parkingOriginal.cols);
   matriz = matriz + Point(-1,-1); //Limits for the matrix
   double valor_celda;
