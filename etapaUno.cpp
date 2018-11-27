@@ -23,7 +23,7 @@
 #include <opencv/cv.h>
 #include <fstream>
 
-//#include <list>
+#include <list>
 
 #define CV_CAST_8U
 
@@ -183,8 +183,7 @@ int main(int argc, char *argv[])
   // ***************************   TRAINING DATA *********************************
 
   //Load original parking image
-  parkingOriginal = imread("/home/hector/Downloads/etapaUno/bin/imagenBase.jpg");
-
+  parkingOriginal = imread("/home/yesus/Documents/vision/nf1/vision/imagen.png", CV_LOAD_IMAGE_COLOR);
   // ***************************   HARDCODED MAP *********************************
   parkingLimits_1channel = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_8UC1 );
   Point polyPoints[4];
@@ -261,6 +260,7 @@ int main(int argc, char *argv[])
   parkingSpaces[9].polyPoints[1] = Point(593,449);
   parkingSpaces[9].polyPoints[2] = Point(593,471);
   parkingSpaces[9].polyPoints[3] = Point(533,467);
+
 
   // set centroids of parkingSpaces
   for(int i = 0; i<10 ; i++)
@@ -1341,6 +1341,99 @@ void mouseOnParkingImage(int event, int x, int y, int flags, void* param)
             break;
     }
 }
+  //Mapa original , //Punto de inicio
+  list create_NF1(Mat parkingOriginal, Point Pi,Point punto_partida ){
+
+  //MAT auxiliar for harcoded Map
+  Mat inicial = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_16UC1);
+  Point matriz  = Point(parkingOriginal.rows,parkingOriginal.cols);
+  matriz = matriz + Point(-1,-1); //Limits for the matrix
+  double valor_celda;
+
+  for(int i=0; i<= parkingOriginal.rows ; i++){
+    for(int j=0; i<=parkingOriginal.cols; j++){
+      double valor_celda = inicial.at<double>(i,j);
+      if (valor_celda=255){
+        inicial.at<double>(i,j) = INT_MAX;
+      }
+
+    }
+  }
+
+  cout<< inicial << endl; //Matriz base
+  list<Point> loc; //List with locations
+  double current=0;
+  cout<< inicial<<endl;
+  cout <<"\n";
+  cout <<"\n";
+  Point vecinos[4] = {Point(0,1),Point(0,-1),Point(1,0),Point(-1,0)}; //Coordenadas vecinos
+  Point Padj,Pev; //Punto evaluado //Punto adyacente
+  
+  loc.push_back(Pi); //Se implanta semilla - Punto inicial
+
+  while (!loc.empty()){
+    //Pev = Fo.back(); 
+    Pev = loc.front(); 
+    double current = inicial.at<double>(Pev.x,Pev.y);
+    //Fo.pop_back();
+    loc.pop_front();
+
+
+    for(int i = 0; i < 4 ; i++){
+      Padj = Pev + vecinos[i];
+      double valor_celda = inicial.at<double>(Padj.x,Padj.y); // Valores en el punto adjacente      
+      //  if (Color(Pa)=0 and f(Pa)=1)
+
+      //if( valor_celda==0 && Padj!=Pi &&Padj.x<=matriz.x &&Padj.x>=0 && Padj.y <=matriz.y && Padj.y >=0)
+      if( valor_celda == 0 && Padj!=Pi && Padj.x<=matriz.x && Padj.x>=0 && Padj.y<=matriz.y && Padj.y >=0)
+      {
+          //Segment for colorfull mat feedback
+          inicial.at<double>(Padj.x,Padj.y) = current +1;
+          loc.push_back(Padj);  
+          
+      }
+    }
+  }
+
+
+  /* BUSQUEDA*/
+  list<Point> path;
+  Point Padjacente;
+  double valor_vecino;
+  double valor_actual;
+
+  path.push_back(punto_partida);
+
+  valor_actual = inicial.at<double>(punto_partida.x,punto_partida.y);
+  cout<< valor_actual<<endl;
+  while (valor_actual!=0){
+
+    for(int i = 0; i < 4 ; i++){
+      Padjacente = punto_partida + vecinos[i];
+      double valor_vecino = inicial.at<double>(Padjacente.x,Padjacente.y); // Valores en el punto adjacente      
+
+      if( Padjacente!=punto_partida &&Padjacente.x<=matriz.x &&Padjacente.x>=0 && Padjacente.y <=matriz.y && Padjacente.y >=0)
+      {
+        if (valor_vecino<valor_actual){
+        punto_partida = Padjacente;
+        valor_actual = inicial.at<double>(punto_partida.x,punto_partida.y);
+        }  
+      path.push_back(punto_partida);    
+      }
+    }
+  }
+return path;
+}
+
+void pintar_ruta(list path, Mat imagen){
+  Point previo;
+  while(!path.empty()){
+    previo = path.pop_front();
+    line(imagen,previo,path.front(), Vec3i(255, 244, 30) , 1) //Azul
+  }
+}
+
+
 
 /* --------------------------------------------------------------------------------------*
  * Function to return navigation base 1 channel matrix depending on target parking space			 					 	                                 *
@@ -1348,4 +1441,4 @@ void mouseOnParkingImage(int event, int x, int y, int flags, void* param)
 void calcularRuta()
 {
   getNavigationBase()
-}*/
+}
