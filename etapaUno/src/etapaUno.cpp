@@ -22,6 +22,7 @@
 #include <math.h>
 #include <opencv/cv.h>
 #include <fstream>
+#include <list>
 
 //#include <list>
 
@@ -42,8 +43,7 @@ Vec3i colors[5] ={
 int coloringIndex = 0;
 
 //global variables for bullsEye drawing
-int activeQuadrant = 0;
-int currentAngle = 20;
+int currentAngle = 0;
 
 
 // Here we will store points
@@ -68,10 +68,12 @@ int iClosing = 5,iClosing2 = 5, iOpening = 5;
 	Mat auxImage;
 	Mat hsv_thres;
   Mat auxImage3;
-	Mat output;
+	//Mat output;
 	Mat GUI;
 
   Mat drawing = Mat::zeros( hsv_thres.size(), CV_8UC3 );
+
+  Mat parkingOriginal;
 
 
 	// Create image template for coloring
@@ -79,6 +81,8 @@ int iClosing = 5,iClosing2 = 5, iOpening = 5;
 
 	/* Create images where captured and transformed frames are going to be stored */
 	Mat currentImage;
+
+  Mat parkingLimits_1channel;
 
 // Store BGR values of a point in image
 Vec3b channels;
@@ -91,6 +95,8 @@ void mouseOnMainImageCallback(int event, int x, int y, int flags, void* param);
 
 void mouseHSVregionCallback(int event, int x, int y, int flags, void* param);
 
+void mouseOnParkingImage(int event, int x, int y, int flags, void* param);
+
 void mod_HSV_threshold(int,void*);
 void getParameterRange();
 void hsvHistogram();
@@ -102,9 +108,13 @@ void find_moments(Mat segmentMoment, ofstream &myfile);
 void plotF1F2(double fi[2]);
 void updateTrainingMoment(Mat segmentToMomento);
 void calculateTrainedPhi();
+void printParking();
 Mat segmentar(Mat binaria);
 Mat getContours(Mat regiones);
 Point getMassCenter(Mat segmentos);
+Mat getNavigationBase(int parkingTargetIndex);
+list<Point> create_NF1(Mat navigationBase, Point puntoInicio,Point puntoFinal );
+void drawTrjectory(list<Point> path, Mat imagen);
 
 //Array to keep track of presence of figures in camera image
 bool presentFigures[4];
@@ -121,12 +131,21 @@ struct trainedDataStruct
   double fi2;
   double desv1;
   double desv2;
+  vector<myPiStruct> fiTVector;
 };
 
 trainedDataStruct trainedData[4];
 
+struct parkingSpacesStruct
+{
+  Point polyPoints[4];
+  Point centroid;
+};
+
+parkingSpacesStruct parkingSpaces[10];
+Point parkingEntryPoints[4];
+
 bool trainingActive = false;
-vector<myPiStruct> fiTrainingVector;
 int trainingId = 4;
 myPiStruct fiTrainingPair;
 
@@ -134,6 +153,8 @@ enum knownFigures { BB8, Lightsaber, R2D2, Spaceship };
 
 RNG rng(12345);
 ofstream myfile;
+
+Point puntoInicio;
 
 /* --------------------------------------------------------------------------------------*
  * #####   MAIN  ######                                                 					       *
@@ -165,6 +186,104 @@ int main(int argc, char *argv[])
 
   // ***************************   TRAINING DATA *********************************
 
+  //Load original parking image
+  parkingOriginal = imread("/home/hector/Downloads/etapaUno/bin/imagenBase.jpg");
+
+  // ***************************   HARDCODED MAP *********************************
+  parkingLimits_1channel = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_8UC1 );
+  Point polyPoints[4];
+  polyPoints[0] = Point(0,0);
+  polyPoints[1] = Point(54,0);
+  polyPoints[2] = Point(66,478);
+  polyPoints[3] = Point(0,474);
+  cv::fillConvexPoly(parkingLimits_1channel, polyPoints, 4, 255, CV_AA, 0);
+  polyPoints[0] = Point(115,119);
+  polyPoints[1] = Point(230,123);
+  polyPoints[2] = Point(235,485);
+  polyPoints[3] = Point(122,477);
+  cv::fillConvexPoly(parkingLimits_1channel, polyPoints, 4, 255, CV_AA, 0);
+  polyPoints[0] = Point(289,125);
+  polyPoints[1] = Point(409,127);
+  polyPoints[2] = Point(413,493);
+  polyPoints[3] = Point(293,485);
+  cv::fillConvexPoly(parkingLimits_1channel, polyPoints, 4, 255, CV_AA, 0);
+  polyPoints[0] = Point(466,132);
+  polyPoints[1] = Point(588,135);
+  polyPoints[2] = Point(591,502);
+  polyPoints[3] = Point(471,496);
+  cv::fillConvexPoly(parkingLimits_1channel, polyPoints, 4, 255, CV_AA, 0);
+  polyPoints[0] = Point(645,80);
+  polyPoints[1] = Point(700,83);
+  polyPoints[2] = Point(700,560);
+  polyPoints[3] = Point(648,560);
+  cv::fillConvexPoly(parkingLimits_1channel, polyPoints, 4, 255, CV_AA, 0);
+  polyPoints[0] = Point(122,0);
+  polyPoints[1] = Point(613,0);
+  polyPoints[2] = Point(614,74);
+  polyPoints[3] = Point(123,59);
+  cv::fillConvexPoly(parkingLimits_1channel, polyPoints, 4, 255, CV_AA, 0);
+
+
+
+  parkingSpaces[0].polyPoints[0] = Point(182,401);
+  parkingSpaces[0].polyPoints[1] = Point(240,402);
+  parkingSpaces[0].polyPoints[2] = Point(240,424);
+  parkingSpaces[0].polyPoints[3] = Point(182,421);
+  parkingSpaces[1].polyPoints[0] = Point(182,456);
+  parkingSpaces[1].polyPoints[1] = Point(240,458);
+  parkingSpaces[1].polyPoints[2] = Point(240,484);
+  parkingSpaces[1].polyPoints[3] = Point(182,477);
+  parkingSpaces[2].polyPoints[0] = Point(290,406);
+  parkingSpaces[2].polyPoints[1] = Point(349,409);
+  parkingSpaces[2].polyPoints[2] = Point(349,431);
+  parkingSpaces[2].polyPoints[3] = Point(290,429);
+  parkingSpaces[3].polyPoints[0] = Point(353,241);
+  parkingSpaces[3].polyPoints[1] = Point(412,245);
+  parkingSpaces[3].polyPoints[2] = Point(414,267);
+  parkingSpaces[3].polyPoints[3] = Point(354,264);
+  parkingSpaces[4].polyPoints[0] = Point(394,17);
+  parkingSpaces[4].polyPoints[1] = Point(418,17);
+  parkingSpaces[4].polyPoints[2] = Point(418,72);
+  parkingSpaces[4].polyPoints[3] = Point(395,73);
+  parkingSpaces[5].polyPoints[0] = Point(449,16);
+  parkingSpaces[5].polyPoints[1] = Point(473,16);
+  parkingSpaces[5].polyPoints[2] = Point(473,74);
+  parkingSpaces[5].polyPoints[3] = Point(451,75);
+  parkingSpaces[6].polyPoints[0] = Point(463,275);
+  parkingSpaces[6].polyPoints[1] = Point(524,277);
+  parkingSpaces[6].polyPoints[2] = Point(524,299);
+  parkingSpaces[6].polyPoints[3] = Point(462,300);
+  parkingSpaces[7].polyPoints[0] = Point(469,442);
+  parkingSpaces[7].polyPoints[1] = Point(526,445);
+  parkingSpaces[7].polyPoints[2] = Point(527,466);
+  parkingSpaces[7].polyPoints[3] = Point(469,464);
+  parkingSpaces[8].polyPoints[0] = Point(530,279);
+  parkingSpaces[8].polyPoints[1] = Point(591,281);
+  parkingSpaces[8].polyPoints[2] = Point(591,303);
+  parkingSpaces[8].polyPoints[3] = Point(531,300);
+  parkingSpaces[9].polyPoints[0] = Point(533,447);
+  parkingSpaces[9].polyPoints[1] = Point(593,449);
+  parkingSpaces[9].polyPoints[2] = Point(593,471);
+  parkingSpaces[9].polyPoints[3] = Point(533,467);
+
+  // set centroids of parkingSpaces
+  for(int i = 0; i<10 ; i++)
+  {
+    Point centroid = Point(0,0);
+    for (int j = 0; j<4 ; j++)
+    {
+      centroid += parkingSpaces[i].polyPoints[j];
+    }
+    centroid = centroid/4;
+    parkingSpaces[i].centroid = centroid;
+  }
+
+  parkingEntryPoints[0] = Point(700,54);
+  parkingEntryPoints[1] = Point(85,0);
+  parkingEntryPoints[2] = Point(0,502);
+  parkingEntryPoints[3] = Point(620,560);
+
+  // ***************************   HARDCODED MAP *********************************
   bool histogramOn = false;
   bool bullsEyeOn = false;
 	/* First, open camera device */
@@ -184,6 +303,9 @@ int main(int argc, char *argv[])
 
     while (true)
     {
+      //Prints parking user interface
+      printParking();
+
   		if (!frozen)
       {
   			/* Obtain a new frame from camera */
@@ -298,30 +420,35 @@ int main(int argc, char *argv[])
               trainingActive = !trainingActive;
               if(trainingActive)
               {
-                trainingId = -1;
-                if(segSeeds.size()!=1){
+                if(segSeeds.size()!=1)
+                {
                   cout<< "Error: solo debe haber una semilla en el entrenamiento" << endl;
                   trainingActive = false;
+                  break;
                 }
-                cout << "Que figura desea entrenar? "<<endl;
-                cout << "  [0] BB8"<<endl;
-                cout << "  [1] Lightsaber "<<endl;
-                cout << "  [2] R2D2 "<<endl;
-                cout << "  [3] Spaceship "<<endl;
-                cin >> trainingId;
+                else
+                {
+                  // print menu to pick training figure
+                  cout << "Que figura desea entrenar? "<<endl;
+                  cout << "  [0] BB8"<<endl;
+                  cout << "  [1] Lightsaber "<<endl;
+                  cout << "  [2] R2D2 "<<endl;
+                  cout << "  [3] Spaceship "<<endl;
+                  cin >> trainingId;
+                  // Clear phi training vector from figure
+                  trainedData[trainingId].fiTVector.clear();
+                }
               }
               else
               {
                 cout << "TrainingId: " << trainingId << endl;
                 calculateTrainedPhi();
-                // Clear phi training vector
-                fiTrainingVector.clear();
               }
               break;
           case 'p':
               // Push training moment to currently trained figure
               if(trainingActive){
-                fiTrainingVector.push_back(fiTrainingPair);
+                trainedData[trainingId].fiTVector.push_back(fiTrainingPair);
                 cout<< "MOMENT PUSHED FOR TRAINING" <<endl;
               }
               break;
@@ -424,8 +551,10 @@ void updateSegContCen()
   }
   // Print segments
   imshow("Segmentos", segmentos);
+  moveWindow("Segmentos", 1300, 0);
   // Print contours
   imshow("Contornos", contoursMat);
+  moveWindow("Contornos", 0, 0);
   ~Mat(segmentos);
   ~Mat(contoursMat);
 }
@@ -465,7 +594,7 @@ void mod_HSV_threshold(int,void*)
 {
 	cvtColor(currentImage, auxImage, cv::COLOR_BGR2HSV);
 	inRange(auxImage, Scalar(low_H, low_S, low_V), Scalar(high_H, high_S, high_V), hsv_thres);
-	currentImage.copyTo(output, hsv_thres);
+	//currentImage.copyTo(output, hsv_thres);
 
   //Apply dilation filter on hsv_thres
   openAndCloseFilter(0,0);
@@ -487,9 +616,9 @@ void mod_HSV_threshold(int,void*)
     imshow("HSV", hsv_thres);
   }
 
-	imshow("HSV Threshold", output);
-  moveWindow("HSV Threshold", 1300, 0);
-	output.release();
+	//imshow("HSV Threshold", output);
+  //moveWindow("HSV Threshold", 1300, 0);
+	//output.release();
 }
 
 
@@ -632,8 +761,8 @@ void drawBullsEye()
     }
   }
   double pi = 3.1415926535897;
-  int height=500, width=500;
-  int cRadius=200;
+  int height=350, width=350;
+  int cRadius=160;
   int c1=1, c2=1, c3=1, c4=1;
   // create mat object to draw on
   Mat eye(height, width, CV_8UC3);
@@ -642,12 +771,28 @@ void drawBullsEye()
 
   //Fill respective quadrant
   switch (cuadrante){
-    case 1: c1 = -1; break;
-    case 2: c2 = -1; break;
-    case 3: c3 = -1; break;
-    case 4: c4 = -1; break;
-    default: break;
+    case 1:
+      c1 = -1;
+      puntoInicio = Point(700,53);
+      break;
+    case 2:
+      c2 = -1;
+      puntoInicio = Point(89,0);
+      break;
+    case 3:
+      c3 = -1;
+      puntoInicio = Point(0,504);
+      break;
+    case 4:
+      c4 = -1;
+      puntoInicio = Point(622,558);
+      break;
+    default:;
   }
+
+  //draw black axis
+  line(eye, Point(0, height/2), Point(width, height/2), Scalar( 0, 0, 0 ), 1, 8, 0);
+  line(eye, Point(width/2, 0), Point(width/2, height), Scalar( 0, 0, 0 ), 1, 8, 0);
 
   //draw circle quarters
   ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 0, 90, Scalar( 0, 0, 255 ), c4, 8, 0);
@@ -655,17 +800,18 @@ void drawBullsEye()
   ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 180, 270, Scalar( 0, 0, 255 ), c2, 8, 0);
   ellipse(eye, Point(width/2, height/2), Size(cRadius, cRadius), 0, 270, 360, Scalar( 0, 0, 255 ), c1, 8, 0);
 
-  //draw red axis
-  line(eye, Point(0, height/2), Point(width, height/2), Scalar( 0, 0, 255 ), 1, 8, 0);
-  line(eye, Point(width/2, 0), Point(width/2, height), Scalar( 0, 0, 255 ), 1, 8, 0);
-
   //Draw angle line
   int angleX = cRadius * cos((-angle*pi)/180);
   int angleY = cRadius * sin((-angle*pi)/180);
-  line(eye, Point(width/2+angleX, height/2+angleY), Point(width/2-angleX, height/2-angleY), Scalar( 255, 0, 0), 3, 8, 0);
+  line(eye, Point(width/2+angleX, height/2+angleY), Point(width/2-angleX, height/2-angleY), Scalar( 255, 0, 0), 1, CV_AA, 0);
+
+  putText(eye, "BB8", Point(width * 0.7, height * 0.52), FONT_HERSHEY_PLAIN, 1, Scalar( 0, 0, 0 ), 2, CV_AA, 0);
+  putText(eye, "Light", Point(width * 0.45, height * 0.3), FONT_HERSHEY_PLAIN, 1, Scalar( 0, 0, 0 ), 2, CV_AA, 0);
+  putText(eye, "R2D2", Point(width * 0.2, height * 0.52), FONT_HERSHEY_PLAIN, 1, Scalar( 0, 0, 0 ), 2, CV_AA, 0);
+  putText(eye, "Spaceship", Point(width * 0.4, height * 0.75), FONT_HERSHEY_PLAIN, 1, Scalar( 0, 0, 0 ), 2, CV_AA, 0);
 
   imshow("bullsEye", eye);
-  moveWindow("bullsEye", 0, 600);
+  //moveWindow("bullsEye", 800, 0);
 }
 
 
@@ -880,8 +1026,8 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
   line(drawing, P1, P2, colors[2], 1, 8, 0);
 
   // Show in a window
-  imshow("Moments Image", drawing );
-  moveWindow("Moments Image", 1000, 400);
+  imshow("Centroid with Axis", drawing );
+  moveWindow("Centroid with Axis", 1300, 0);
 
 
   //cout << "angulo rad: " << angle_rad << endl;
@@ -907,7 +1053,6 @@ void find_moments(Mat segmentMoment, ofstream &myfile)
 
 
   //Reset angle and figure presence for bullsEye drawing
-  currentAngle = 0;
   if (cuentame>1){
   presentFigures[BB8] = false;
   presentFigures[Lightsaber] = false;
@@ -982,6 +1127,9 @@ void plotF1F2(double fi[2])
   Scalar color_line = Scalar(47, 255, 173); // Green
   Mat plano = Mat::zeros( hsv_thres.size(), CV_8UC3 );
 
+  double scalingFactorX = hsv_thres.cols * 1.75;
+  double scalingFactorY = hsv_thres.rows * 4.5;
+
   // Draw Fi values 320x240
   Point xi, xf, yi, yf, textf1, textf2;
   xi.x = 0; xi.y = hsv_thres.rows;
@@ -999,8 +1147,8 @@ void plotF1F2(double fi[2])
   putText(plano, "Fi2", textf2, FONT_HERSHEY_SIMPLEX, 1, color_point, 1, 2, 0);
   // Plotear fi values
   Point P_fi;
-  P_fi.x = (fi[0] * hsv_thres.cols); //Fi1
-  P_fi.y = (fi[1] * hsv_thres.rows); //Fi2
+  P_fi.x = (fi[0] * scalingFactorX); //Fi1
+  P_fi.y = (fi[1] * scalingFactorY); //Fi2
   circle(plano, Point(P_fi.x, hsv_thres.rows - P_fi.y), 0, color_point, 5, 8, 0);
 
   //Paint stored figures caracterization
@@ -1010,16 +1158,21 @@ void plotF1F2(double fi[2])
 
   for(int i = 0; i<4 ; i++){
     //rectangle(plano, Point((trainedData[i].fi2 - trainedData[i].desv2)* hsv_thres.cols, (trainedData[i].fi1 + trainedData[i].desv1)* hsv_thres.rows), Point((trainedData[i].fi2 + trainedData[i].desv2)* hsv_thres.cols, (trainedData[i].fi1 - trainedData[i].desv1)* hsv_thres.rows), colors[i], 2, 8, 0);
-    rectangle(plano, Point((trainedData[i].fi1 + trainedData[i].desv1)* hsv_thres.cols, hsv_thres.rows - (trainedData[i].fi2 - trainedData[i].desv2)* hsv_thres.rows), Point((trainedData[i].fi1 - trainedData[i].desv1)* hsv_thres.cols, hsv_thres.rows - (trainedData[i].fi2 + trainedData[i].desv2)* hsv_thres.rows), colors[i], 2, 8, 0);
+    rectangle(plano, Point((trainedData[i].fi1 + trainedData[i].desv1)* scalingFactorX, hsv_thres.rows - (trainedData[i].fi2 - trainedData[i].desv2)* scalingFactorY), Point((trainedData[i].fi1 - trainedData[i].desv1)* scalingFactorX, hsv_thres.rows - (trainedData[i].fi2 + trainedData[i].desv2)* scalingFactorY), colors[i], 2, 8, 0);
+    // Plot every training point for current figure
+    for(myPiStruct trainingF : trainedData[i].fiTVector)
+    {
+      circle(plano, Point(trainingF.phiG1* scalingFactorX, hsv_thres.rows - trainingF.phiG2*scalingFactorY), 1, colors[i], -1, 8, 0);
+    }
   }
 
-  putText(plano, "BB8", Point(trainedData[0].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[0].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
-  putText(plano, "Light", Point(trainedData[1].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[1].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
-  putText(plano, "R2D2", Point(trainedData[2].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[2].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
-  putText(plano, "Spaceship", Point(trainedData[3].fi1* hsv_thres.cols, hsv_thres.rows - trainedData[3].fi2 * hsv_thres.rows), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
-
+  putText(plano, "BB8", Point(trainedData[0].fi1* scalingFactorX, hsv_thres.rows - trainedData[0].fi2 * scalingFactorY), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
+  putText(plano, "Light", Point(trainedData[1].fi1* scalingFactorX, hsv_thres.rows - trainedData[1].fi2 * scalingFactorY), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
+  putText(plano, "R2D2", Point(trainedData[2].fi1* scalingFactorX, hsv_thres.rows - trainedData[2].fi2 * scalingFactorY), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
+  putText(plano, "Spaceship", Point(trainedData[3].fi1* scalingFactorX, hsv_thres.rows - trainedData[3].fi2 * scalingFactorY), FONT_HERSHEY_SIMPLEX, 0.5, color_point, 1, 2, 0);
   namedWindow("Plano", CV_WINDOW_AUTOSIZE);
   imshow("Plano", plano);
+  moveWindow("Plano", 0, 1000);
 }
 
 /* --------------------------------------------------------------------------------------*
@@ -1094,39 +1247,231 @@ void updateTrainingMoment(Mat segmentMoment)
  * ------------------------------------------------------------------------------------- */
 void calculateTrainedPhi()
 {
-    int sizeOfVector = fiTrainingVector.size();
+    int sizeOfVector = trainedData[trainingId].fiTVector.size();
     double sum = 0.0, mean, standardDeviation = 0.0;
-
-    for(int i = 0; i < sizeOfVector; i++)
+    if(sizeOfVector > 0)
     {
-        sum += fiTrainingVector.at(i).phiG1;
+      for(int i = 0; i < sizeOfVector; i++)
+      {
+          sum += trainedData[trainingId].fiTVector.at(i).phiG1;
+      }
+
+      mean = sum/sizeOfVector;
+
+      for(int i = 0; i < sizeOfVector; i++)
+          standardDeviation += pow(trainedData[trainingId].fiTVector.at(i).phiG1 - mean, 2);
+
+      standardDeviation = sqrt(standardDeviation / sizeOfVector);
+
+      trainedData[trainingId].fi1 = mean;
+      trainedData[trainingId].desv1 = standardDeviation;
+
+      sum = 0.0;
+      standardDeviation = 0.0;
+
+      for(int i = 0; i < sizeOfVector; i++)
+      {
+          sum += trainedData[trainingId].fiTVector.at(i).phiG2;
+      }
+
+      mean = sum/sizeOfVector;
+
+      for(int i = 0; i < sizeOfVector; i++)
+          standardDeviation += pow(trainedData[trainingId].fiTVector.at(i).phiG2 - mean, 2);
+
+      standardDeviation = sqrt(standardDeviation / sizeOfVector);
+
+      trainedData[trainingId].fi2 = mean;
+      trainedData[trainingId].desv2 = standardDeviation;
     }
+}
 
-    mean = sum/sizeOfVector;
 
-    for(int i = 0; i < sizeOfVector; i++)
-        standardDeviation += pow(fiTrainingVector.at(i).phiG1 - mean, 2);
+/* --------------------------------------------------------------------------------------*
+ * Function to print the parking spaces user interface			 					 	                                 *
+ * ------------------------------------------------------------------------------------- */
+void printParking()
+{
 
-    standardDeviation = sqrt(standardDeviation / sizeOfVector);
+    imshow("Estacionamiento", parkingOriginal);
+    setMouseCallback("Estacionamiento", mouseOnParkingImage);
+    //setMouseCallback("Estacionamiento", mouseOnMainImageCallback);
+}
 
-    trainedData[trainingId].fi1 = mean;
-    trainedData[trainingId].desv1 = standardDeviation;
 
-    sum = 0.0;
-    standardDeviation = 0.0;
+/* --------------------------------------------------------------------------------------*
+ * Function to return navigation base 1 channel matrix depending on target parking space			 					 	                                 *
+ * ------------------------------------------------------------------------------------- */
+Mat getNavigationBase(int parkingTargetIndex)
+{
+  Mat returnMat = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_8UC1 );
+  parkingLimits_1channel.copyTo(returnMat);
+  fillConvexPoly(returnMat, parkingSpaces[parkingTargetIndex].polyPoints, 4, 0, CV_AA, 0);
+  return returnMat;
+}
 
-    for(int i = 0; i < sizeOfVector; i++)
+/* --------------------------------------------------------------------------------------*
+ * Callback for click on Parking Space window 			 					 	                                 *
+ * ------------------------------------------------------------------------------------- */
+void mouseOnParkingImage(int event, int x, int y, int flags, void* param)
+{
+    switch (event)
     {
-        sum += fiTrainingVector.at(i).phiG2;
+        case CV_EVENT_LBUTTONDOWN:
+            //Test that parking original is loaded
+            if(parkingOriginal.rows > 0)
+            {
+              Mat parkingTargets = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_8UC1 );
+
+              for(int i = 0; i<10 ; i++)
+              {
+                fillConvexPoly(parkingTargets, parkingSpaces[i].polyPoints, 4, i+1, CV_AA, 0);
+              }
+
+  						// Get parking space index at point
+  						int index = parkingTargets.at<uchar>(y,x) - 1;
+
+              if(index>-1)
+              {
+                // Print mouse position
+                //cout << "  Mouse X, Y: " << x << ", " << y << " ---> ";
+                cout << "Parking Space Number: " << index <<endl;
+                Mat navigationBase = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_8UC1 );
+                navigationBase = getNavigationBase(index);
+                int radioCarro = 17;
+                Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(radioCarro,radioCarro));
+                dilate(navigationBase,navigationBase,kernel);
+                imshow("navigationBase", navigationBase);
+                list<Point> path;
+                path = create_NF1(navigationBase, parkingSpaces[index].centroid, parkingEntryPoints[0]);
+                drawTrjectory(path, navigationBase);
+              }
+              else
+              {
+                cout<< "HACER CLICK EN ESPACIO DE ESTACIONAMIENTO LIBRE" <<endl;
+              }
+
+            }
+            break;
+        default:
+            break;
     }
+}
 
-    mean = sum/sizeOfVector;
+/* --------------------------------------------------------------------------------------*
+ * Function to get car trajectory with NF1 algorithm 			 					 	                                 *
+ * ------------------------------------------------------------------------------------- */
+list<Point> create_NF1(Mat navigationBase, Point puntoInicio,Point puntoFinal )
+{
+  list<Point> path;
+  //MAT auxiliar for harcoded Map
+  Mat matNF1 = Mat::zeros( navigationBase.rows, navigationBase.cols, CV_16UC1);
+  Point limiteMatriz  = Point(navigationBase.cols, navigationBase.rows);
 
-    for(int i = 0; i < sizeOfVector; i++)
-        standardDeviation += pow(fiTrainingVector.at(i).phiG2 - mean, 2);
+  int valor_celda;
 
-    standardDeviation = sqrt(standardDeviation / sizeOfVector);
+  for(int i=0; i < navigationBase.rows ; i++)
+  {
+    for(int j=0; j < navigationBase.cols; j++)
+    {
+      valor_celda = navigationBase.at<uchar>(i,j);
+      if (valor_celda==255)
+      {
+        matNF1.at<ushort>(i,j) = 0xFFFF;
+      }
+    }
+  }
+  //cout << "DEBUG value: " << matNF1.at<ushort>(10,10) <<endl;
+  //imshow("DEBUG", matNF1);
 
-    trainedData[trainingId].fi2 = mean;
-    trainedData[trainingId].desv2 = standardDeviation;
+  //cout<< matNF1 << endl; //limiteMatriz base
+  list<Point> loc; //List with locations
+  int current=0;
+  //cout<< matNF1<<endl;
+  //cout <<"\n";
+  //cout <<"\n";
+  Point vecinos[4] = {Point(0,1),Point(0,-1),Point(1,0),Point(-1,0)}; //Coordenadas vecinos
+  //Point Padj,Pev; //Punto evaluado //Punto adyacente
+
+  loc.push_back(puntoInicio); //Se implanta semilla - Punto inicial
+
+  cout<<"Punto de Inicio; x:"<<puntoInicio.x<<"y:"<<puntoInicio.y<<endl;
+  cout<<"Punto de Fin; x:"<<puntoFinal.x<<"y:"<<puntoFinal.y<<endl;
+
+  while (!loc.empty())
+  {
+
+    //cout << "Counter: " << debugCounter++ <<endl;
+    Point Pev = loc.front();
+    current = matNF1.at<ushort>(Pev.y,Pev.x);
+
+    loc.pop_front();
+    //cout<<"Punto de Inicio; x:"<<Pev.x<<"y:"<<Pev.y<<endl;
+    for(int i = 0; i < 4 ; i++)
+    {
+      Point Padj = Pev + vecinos[i];
+      if(Padj.x<limiteMatriz.x && Padj.x>=0 && Padj.y<limiteMatriz.y && Padj.y >=0)
+      {
+        int valor_celda = matNF1.at<ushort>(Padj.y,Padj.x); // Valores en el punto adjacente
+        if( valor_celda == 0 && Padj!=puntoInicio)
+        {
+            matNF1.at<ushort>(Padj.y,Padj.x) = current +1;
+            loc.push_back(Padj);
+        }
+      }
+    }
+  }
+
+  //cout << matNF1 <<endl;
+
+  // BUSQUEDA
+  Point Padjacente;
+  int valor_vecino;
+  int valor_actual;
+
+  path.push_back(puntoFinal);
+
+  valor_actual = matNF1.at<ushort>(puntoFinal.y,puntoFinal.x);
+  //cout<< valor_actual<<endl;
+  while (valor_actual!=0)
+  {
+    for(int i = 0; i < 4 ; i++)
+    {
+      Padjacente = puntoFinal + vecinos[i];
+      if(Padjacente.x<limiteMatriz.x &&Padjacente.x>=0 && Padjacente.y <limiteMatriz.y && Padjacente.y >=0)
+      {
+        valor_vecino = matNF1.at<ushort>(Padjacente.y,Padjacente.x); // Valores en el punto adjacente
+
+        if( Padjacente!=puntoFinal)
+        {
+          if (valor_vecino<valor_actual)
+          {
+            puntoFinal = Padjacente;
+            valor_actual = matNF1.at<ushort>(puntoFinal.y,puntoFinal.x);
+          }
+        path.push_back(puntoFinal);
+        }
+      }
+    }
+  }
+  return path;
+}
+
+/* --------------------------------------------------------------------------------------*
+ * Function to paint and display car trajectory		 					 	                                 *
+ * ------------------------------------------------------------------------------------- */
+void drawTrjectory(list<Point> path, Mat imagen)
+{
+  Mat imagenTrayectoria = Mat::zeros(parkingOriginal.rows, parkingOriginal.cols, CV_8UC3);
+  imagen.copyTo(imagenTrayectoria);
+
+  Point previo = path.front();
+  path.pop_front();
+  while(!path.empty())
+  {
+    line(imagenTrayectoria,previo,path.front(), Scalar(255, 244, 30) , 1); //Azul
+    previo = path.front();
+    path.pop_front();
+  }
+  imshow("Trayectoria",imagenTrayectoria);
 }
