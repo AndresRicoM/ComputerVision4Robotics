@@ -45,6 +45,9 @@ int coloringIndex = 0;
 //global variables for bullsEye drawing
 int currentAngle = 0;
 
+int radioCarro = 10;
+int parkingEntryPointIndex = 0;
+
 
 // Here we will store points
 vector<Point> points;
@@ -98,6 +101,7 @@ void mouseHSVregionCallback(int event, int x, int y, int flags, void* param);
 void mouseOnParkingImage(int event, int x, int y, int flags, void* param);
 
 void mod_HSV_threshold(int,void*);
+void mod_carRadio(int,void*);
 void getParameterRange();
 void hsvHistogram();
 void drawBullsEye();
@@ -115,6 +119,7 @@ Point getMassCenter(Mat segmentos);
 Mat getNavigationBase(int parkingTargetIndex);
 list<Point> create_NF1(Mat navigationBase, Point puntoInicio,Point puntoFinal );
 void drawTrjectory(list<Point> path, Mat imagen);
+void animateTrajectory(list<Point> path);
 
 //Array to keep track of presence of figures in camera image
 bool presentFigures[4];
@@ -153,8 +158,6 @@ enum knownFigures { BB8, Lightsaber, R2D2, Spaceship };
 
 RNG rng(12345);
 ofstream myfile;
-
-Point puntoInicio;
 
 /* --------------------------------------------------------------------------------------*
  * #####   MAIN  ######                                                 					       *
@@ -300,11 +303,11 @@ int main(int argc, char *argv[])
 
     histPoints.push_back(Point(0,0));
 
+    //Prints parking user interface
+    printParking();
 
     while (true)
     {
-      //Prints parking user interface
-      printParking();
 
   		if (!frozen)
       {
@@ -621,6 +624,14 @@ void mod_HSV_threshold(int,void*)
 	//output.release();
 }
 
+/* --------------------------------------------------------------------------------------*
+ * ----   Callback for manipulation of car radio trackbar   ----                         *
+ * ------------------------------------------------------------------------------------- */
+void mod_carRadio(int,void*)
+{
+}
+
+
 
 /* --------------------------------------------------------------------------------------*
  * ----   Function to autoset ranges for thresholds in color spaces   ----               *
@@ -773,19 +784,19 @@ void drawBullsEye()
   switch (cuadrante){
     case 1:
       c1 = -1;
-      puntoInicio = Point(700,53);
+      parkingEntryPointIndex = 0;
       break;
     case 2:
       c2 = -1;
-      puntoInicio = Point(89,0);
+      parkingEntryPointIndex = 1;
       break;
     case 3:
       c3 = -1;
-      puntoInicio = Point(0,504);
+      parkingEntryPointIndex = 2;
       break;
     case 4:
       c4 = -1;
-      puntoInicio = Point(622,558);
+      parkingEntryPointIndex = 3;
       break;
     default:;
   }
@@ -1295,6 +1306,7 @@ void printParking()
 
     imshow("Estacionamiento", parkingOriginal);
     setMouseCallback("Estacionamiento", mouseOnParkingImage);
+    createTrackbar("Car Radio", "Estacionamiento", &radioCarro, 20, mod_carRadio);
     //setMouseCallback("Estacionamiento", mouseOnMainImageCallback);
 }
 
@@ -1338,13 +1350,14 @@ void mouseOnParkingImage(int event, int x, int y, int flags, void* param)
                 cout << "Parking Space Number: " << index <<endl;
                 Mat navigationBase = Mat::zeros( parkingOriginal.rows, parkingOriginal.cols, CV_8UC1 );
                 navigationBase = getNavigationBase(index);
-                int radioCarro = 17;
                 Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(radioCarro,radioCarro));
                 dilate(navigationBase,navigationBase,kernel);
                 imshow("navigationBase", navigationBase);
-                list<Point> path;
-                path = create_NF1(navigationBase, parkingSpaces[index].centroid, parkingEntryPoints[0]);
+                list<Point> path, pathCopy;
+                path = create_NF1(navigationBase, parkingSpaces[index].centroid, parkingEntryPoints[parkingEntryPointIndex]);
+                pathCopy = path;
                 drawTrjectory(path, navigationBase);
+                animateTrajectory(pathCopy);
               }
               else
               {
@@ -1474,4 +1487,23 @@ void drawTrjectory(list<Point> path, Mat imagen)
     path.pop_front();
   }
   imshow("Trayectoria",imagenTrayectoria);
+}
+
+/* --------------------------------------------------------------------------------------*
+ * Function to make an animation of car movements		 		                                  *
+ * ------------------------------------------------------------------------------------- */
+void animateTrajectory(list<Point> path)
+{
+  Mat imagenAnimacion = Mat::zeros(parkingOriginal.rows, parkingOriginal.cols, CV_8UC3);
+  parkingOriginal.copyTo(imagenAnimacion);
+
+
+  while(!path.empty())
+  {
+    circle(imagenAnimacion,path.front(), radioCarro, Scalar(255, 244, 30) , -1, CV_AA); //Azul
+    path.pop_front();
+    imshow("Estacionamiento",imagenAnimacion);
+    waitKey(5);
+    parkingOriginal.copyTo(imagenAnimacion);
+  }
 }
